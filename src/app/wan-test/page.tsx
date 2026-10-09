@@ -5,17 +5,19 @@ import { useState, type FormEvent } from "react";
 
 export default function WanTestPage() {
   const [image, setImage] = useState<File | null>(null);
-  const [prompt, setPrompt] = useState(
-    "A cinematic warrior slowly walks forward with a majestic lion beside him. Realistic motion, dramatic smoke, epic lighting."
-  );
+  const [prompt, setPrompt] = useState("");
+  const [duration, setDuration] = useState(3);
   const [loading, setLoading] = useState(false);
   const [videoUrl, setVideoUrl] = useState("");
   const [error, setError] = useState("");
 
-  async function generate(e: FormEvent<HTMLFormElement>) {
+  async function generateVideo(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
 
-    if (!image || loading) return;
+    if (!image || !prompt.trim()) {
+      setError("Lütfen fotoğraf ve prompt gir.");
+      return;
+    }
 
     setLoading(true);
     setError("");
@@ -25,26 +27,27 @@ export default function WanTestPage() {
       const form = new FormData();
       form.append("image", image);
       form.append("prompt", prompt);
+      form.append("duration", String(duration));
 
       const response = await fetch("/api/wan-generate", {
         method: "POST",
         body: form,
       });
 
-      const result = await response.json();
+      const data = await response.json();
 
-      if (!response.ok || !result.videoUrl) {
+      if (!response.ok || !data.success || !data.videoUrl) {
         throw new Error(
-          result.error || "Video uretilemedi."
+          data.error || "Video oluşturulamadı."
         );
       }
 
-      setVideoUrl(result.videoUrl);
+      setVideoUrl(data.videoUrl);
     } catch (err) {
       setError(
         err instanceof Error
           ? err.message
-          : "Bilinmeyen bir hata olustu."
+          : "Beklenmeyen bir hata oluştu."
       );
     } finally {
       setLoading(false);
@@ -52,98 +55,166 @@ export default function WanTestPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#09090f] px-5 py-14 text-white">
-      <div className="mx-auto max-w-2xl space-y-7">
-        <div>
-          <p className="text-sm text-purple-400">
-            HAGY AI CREATIVE STUDIO
-          </p>
-          <h1 className="mt-2 text-3xl font-bold">
-            Wan 2.2 AI Video Test
-          </h1>
-          <p className="mt-2 text-sm text-zinc-400">
-            Gercek AI video uretimini test ediyoruz.
-          </p>
-        </div>
+    <main
+      style={{
+        minHeight: "100vh",
+        background: "#09090f",
+        color: "white",
+        padding: "50px 20px",
+        fontFamily: "Arial, sans-serif",
+      }}
+    >
+      <div style={{ maxWidth: 650, margin: "0 auto" }}>
+        <h1 style={{ fontSize: 32, marginBottom: 8 }}>
+          HAGY AI Video Studio
+        </h1>
+
+        <p style={{ color: "#aaa", marginBottom: 30 }}>
+          Wan 2.2 Lightning — AI Video Generation
+        </p>
 
         <form
-          onSubmit={generate}
-          className="space-y-5 rounded-2xl border border-white/10 bg-white/5 p-6"
+          onSubmit={generateVideo}
+          style={{ display: "grid", gap: 22 }}
         >
-          <div className="space-y-2">
-            <label className="block text-sm font-medium">
-              Karakter Fotografı
+          <div>
+            <label
+              htmlFor="character-image"
+              style={{ display: "block", marginBottom: 10 }}
+            >
+              Karakter Fotoğrafı
             </label>
+
             <input
+              id="character-image"
               type="file"
-              accept="image/png,image/jpeg,image/webp"
-              required
+              accept="image/jpeg,image/png,image/webp"
               onChange={(e) =>
                 setImage(e.target.files?.[0] || null)
               }
-              className="block w-full text-sm"
+              style={{ width: "100%" }}
             />
-            <p className="text-xs text-zinc-400">
+
+            <p style={{ color: "#888", fontSize: 13 }}>
               JPG, PNG veya WebP. En fazla 3 MB.
             </p>
           </div>
 
-          <div className="space-y-2">
-            <label className="block text-sm font-medium">
+          <div>
+            <label
+              htmlFor="video-prompt"
+              style={{ display: "block", marginBottom: 10 }}
+            >
               Video Prompt
             </label>
+
             <textarea
+              id="video-prompt"
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
-              rows={4}
-              required
-              className="w-full rounded-xl border border-white/15 bg-black/40 p-3 text-sm outline-none focus:border-purple-500"
+              placeholder="Describe the cinematic video..."
+              rows={5}
+              style={{
+                width: "100%",
+                padding: 14,
+                borderRadius: 10,
+                border: "1px solid #444",
+                background: "#171720",
+                color: "white",
+                boxSizing: "border-box",
+              }}
             />
+          </div>
+
+          <div>
+            <label
+              htmlFor="video-duration"
+              style={{ display: "block", marginBottom: 10 }}
+            >
+              Video Süresi
+            </label>
+
+            <select
+              id="video-duration"
+              value={duration}
+              onChange={(e) =>
+                setDuration(Number(e.target.value))
+              }
+              style={{
+                width: "100%",
+                padding: 14,
+                borderRadius: 10,
+                border: "1px solid #444",
+                background: "#171720",
+                color: "white",
+              }}
+            >
+              <option value={3}>3 saniye — Hızlı Test</option>
+              <option value={5}>5 saniye — Kısa Video</option>
+              <option value={8}>8 saniye — Sinematik</option>
+              <option value={10}>10 saniye — Uzun Video</option>
+            </select>
           </div>
 
           <button
             type="submit"
-            disabled={loading || !image || !prompt.trim()}
-            className="w-full rounded-xl bg-purple-600 px-5 py-3 font-semibold transition hover:bg-purple-500 disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={loading}
+            style={{
+              padding: 16,
+              background: loading ? "#555" : "#793cff",
+              color: "white",
+              border: "none",
+              borderRadius: 12,
+              fontSize: 17,
+              fontWeight: "bold",
+              cursor: loading ? "wait" : "pointer",
+            }}
           >
             {loading
-              ? "AI video olusturuluyor, bekle..."
+              ? "AI Video Oluşturuluyor..."
               : "Generate AI Video"}
           </button>
-
-          {error && (
-            <p className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">
-              {error}
-            </p>
-          )}
         </form>
 
-        {loading && (
-          <p className="text-center text-sm text-zinc-400">
-            Wan 2.2 modeli islem yapiyor. ZeroGPU sirasi
-            veya Vercel zaman siniri nedeniyle islem
-            basarisiz olabilir.
+        {error && (
+          <p
+            role="alert"
+            style={{ color: "#ff7777", marginTop: 24 }}
+          >
+            {error}
           </p>
         )}
 
         {videoUrl && (
-          <section className="space-y-4">
-            <h2 className="text-xl font-semibold">
-              Olusturulan Video
-            </h2>
+          <section style={{ marginTop: 35 }}>
+            <h2>Oluşturulan Video</h2>
+
             <video
               src={videoUrl}
               controls
               playsInline
-              className="w-full rounded-xl"
+              style={{
+                width: "100%",
+                borderRadius: 12,
+                marginTop: 15,
+              }}
             />
+
             <a
               href={videoUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-block rounded-xl bg-white px-5 py-3 font-semibold text-black"
+              style={{
+                display: "inline-block",
+                marginTop: 20,
+                padding: "12px 20px",
+                background: "#793cff",
+                color: "white",
+                borderRadius: 10,
+                textDecoration: "none",
+              }}
             >
-              Videoyu Ac / Indir
+              Videoyu Aç / İndir
             </a>
           </section>
         )}
