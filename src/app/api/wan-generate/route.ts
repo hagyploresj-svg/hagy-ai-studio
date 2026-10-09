@@ -8,11 +8,15 @@ export const maxDuration = 60;
 const SPACE =
   "https://saravutw-wan2-2-i2v-lightning-4-8step-custom.hf.space";
 
+const ALLOWED_DURATIONS = [3, 5, 8, 10];
+
 export async function POST(request: NextRequest) {
   try {
     const form = await request.formData();
+
     const image = form.get("image");
     const prompt = String(form.get("prompt") || "").trim();
+    const duration = Number(form.get("duration") || 3);
 
     if (!(image instanceof File)) {
       return NextResponse.json(
@@ -21,7 +25,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!["image/jpeg", "image/png", "image/webp"].includes(image.type)) {
+    if (
+      !["image/jpeg", "image/png", "image/webp"].includes(
+        image.type
+      )
+    ) {
       return NextResponse.json(
         { error: "JPG, PNG veya WEBP yüklemelisin." },
         { status: 400 }
@@ -42,6 +50,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    if (!ALLOWED_DURATIONS.includes(duration)) {
+      return NextResponse.json(
+        { error: "Geçersiz video süresi." },
+        { status: 400 }
+      );
+    }
+
     const client = await Client.connect(SPACE);
 
     const result = await client.predict("/generate_video", {
@@ -51,7 +66,7 @@ export async function POST(request: NextRequest) {
       steps: 4,
       negative_prompt:
         "blurry, low quality, deformed, watermark, bad anatomy, shaky camera",
-      duration_seconds: 3,
+      duration_seconds: duration,
       guidance_scale: 1,
       guidance_scale_2: 1,
       seed: 42,
@@ -67,7 +82,9 @@ export async function POST(request: NextRequest) {
     const data = result.data as Array<unknown>;
 
     function getUrl(value: unknown): string | null {
-      if (!value || typeof value !== "object") return null;
+      if (!value || typeof value !== "object") {
+        return null;
+      }
 
       const item = value as {
         url?: string;
@@ -88,7 +105,9 @@ export async function POST(request: NextRequest) {
       try {
         const response = await fetch(url, {
           method: "GET",
-          headers: { Range: "bytes=0-1023" },
+          headers: {
+            Range: "bytes=0-1023",
+          },
           cache: "no-store",
           signal: AbortSignal.timeout(10000),
         });
@@ -107,10 +126,11 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const [generatedCheck, downloadCheck] = await Promise.all([
-      checkUrl(generatedVideoUrl),
-      checkUrl(downloadVideoUrl),
-    ]);
+    const [generatedCheck, downloadCheck] =
+      await Promise.all([
+        checkUrl(generatedVideoUrl),
+        checkUrl(downloadVideoUrl),
+      ]);
 
     const workingUrl = downloadCheck.available
       ? downloadVideoUrl
@@ -121,6 +141,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: Boolean(workingUrl),
       model: "Wan 2.2 Lightning",
+      duration,
       videoUrl: workingUrl,
       generatedVideo: {
         url: generatedVideoUrl,
@@ -132,7 +153,7 @@ export async function POST(request: NextRequest) {
       },
       error: workingUrl
         ? null
-        : "Video bağlantılarına erişilemiyor. İki çıktı da kontrol edildi.",
+        : "Video oluşturuldu ancak dosyaya erişilemiyor.",
     });
   } catch (error) {
     console.error("WAN GENERATE ERROR:", error);
