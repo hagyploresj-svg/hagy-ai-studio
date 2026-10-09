@@ -12,10 +12,8 @@ const ALLOWED_DURATIONS = [3, 5];
 
 type VideoFile = {
   url?: string;
-  path?: string;
   video?: {
     url?: string;
-    path?: string;
   };
 };
 
@@ -145,10 +143,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Gradio dosyalarını otomatik indirmeyi kapat.
-    const client = await Client.connect(SPACE, {
-      download_files: false,
-    });
+    // Gradio istemcisine bağlan.
+    const client = await Client.connect(SPACE);
 
     // Wan 2.2 Lightning ile video oluştur.
     const result = await client.predict("/generate_video", {
@@ -173,7 +169,7 @@ export async function POST(request: NextRequest) {
 
     const data = result.data as unknown[];
 
-    // İlk çıktı: video oynatıcı
+    // Birinci çıktı: oynatılabilir video
     const generatedVideoUrl = getVideoUrl(data?.[0]);
 
     // İkinci çıktı: indirilebilir video
