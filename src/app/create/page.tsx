@@ -1,7 +1,13 @@
 
 "use client";
 
-import { Suspense, useEffect, useRef, useState } from "react";
+import {
+  Suspense,
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import { useSearchParams } from "next/navigation";
 import {
   Upload,
@@ -67,6 +73,26 @@ function Pills<T extends string | number>({
   );
 }
 
+type Particle = {
+  x: number;
+  y: number;
+  size: number;
+  speed: number;
+  phase: number;
+};
+
+function makeParticles(count: number): Particle[] {
+  return Array.from({ length: count }, (_, i) => ({
+    x: ((i * 73.7) % 100) / 100,
+    y: ((i * 41.3) % 100) / 100,
+    size: 1 + ((i * 7) % 4),
+    speed: 0.15 + ((i * 13) % 10) / 20,
+    phase: i * 1.73,
+  }));
+}
+
+const particles = makeParticles(85);
+
 function Creator() {
   const { t, lang } = useI18n();
   const params = useSearchParams();
@@ -78,11 +104,9 @@ function Creator() {
   const [studio, setStudio] = useState<Studio | null>(
     requestedTemplate?.studio ?? null
   );
-
   const [tplId, setTplId] = useState(
     requestedTemplate?.id ?? templates[0].id
   );
-
   const [file, setFile] = useState<File | null>(null);
   const [style, setStyle] = useState(effects[0]);
   const [seconds, setSeconds] = useState(10);
@@ -116,7 +140,6 @@ function Creator() {
     const firstTemplate = templates.find(
       (item) => item.studio === id
     );
-
     setStudio(id);
     setTplId(firstTemplate?.id ?? templates[0].id);
     setError("");
@@ -127,14 +150,13 @@ function Creator() {
       URL.revokeObjectURL(videoUrlRef.current);
       videoUrlRef.current = "";
     }
-
     setVideoUrl("");
     setProgress(0);
     setError("");
     setStatus("idle");
   }
 
-  async function submit(e: React.FormEvent<HTMLFormElement>) {
+  async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
 
     if (renderingRef.current) return;
@@ -172,9 +194,7 @@ function Creator() {
       typeof MediaRecorder === "undefined" ||
       !HTMLCanvasElement.prototype.captureStream
     ) {
-      setError(
-        "Tarayıcın video oluşturmayı desteklemiyor."
-      );
+      setError("Tarayıcın video oluşturmayı desteklemiyor.");
       return;
     }
 
@@ -185,9 +205,7 @@ function Creator() {
     ].find((type) => MediaRecorder.isTypeSupported(type));
 
     if (!mimeType) {
-      setError(
-        "Tarayıcın WebM video kaydını desteklemiyor."
-      );
+      setError("Tarayıcın WebM kaydını desteklemiyor.");
       return;
     }
 
@@ -220,11 +238,331 @@ function Creator() {
       }
 
       const ctx = canvas.getContext("2d");
-
       if (!ctx) {
-        throw new Error(
-          "Video çizim motoru başlatılamadı."
+        throw new Error("Video motoru başlatılamadı.");
+      }
+
+      const width = canvas.width;
+      const height = canvas.height;
+      const duration = Math.max(1, Number(seconds));
+      const caption = captionText.trim();
+      const selectedStyle = style;
+
+      function drawFrame(elapsed: number) {
+        if (!ctx) return;
+
+        const p = Math.min(elapsed / (duration * 1000), 1);
+        const time = elapsed / 1000;
+
+        ctx.clearRect(0, 0, width, height);
+        ctx.fillStyle = "#09090F";
+        ctx.fillRect(0, 0, width, height);
+
+        // Sinematik kamera hareketi
+        const zoom =
+          selectedStyle === "Minimal"
+            ? 1.02 + p * 0.04
+            : 1.06 + p * 0.12;
+
+        const scale =
+          Math.max(
+            width / image.width,
+            height / image.height
+          ) * zoom;
+
+        const drawW = image.width * scale;
+        const drawH = image.height * scale;
+
+        const moveX =
+          Math.sin(p * Math.PI * 2) *
+          width *
+          (selectedStyle === "Minimal" ? 0.006 : 0.02);
+
+        const moveY =
+          Math.sin(p * Math.PI) *
+          height *
+          0.012;
+
+        ctx.save();
+        ctx.drawImage(
+          image,
+          (width - drawW) / 2 + moveX,
+          (height - drawH) / 2 + moveY,
+          drawW,
+          drawH
         );
+        ctx.restore();
+
+        // Genel sinematik renk katmanı
+        if (selectedStyle !== "Minimal") {
+          const shade = ctx.createLinearGradient(
+            0,
+            0,
+            0,
+            height
+          );
+          shade.addColorStop(0, "rgba(0,0,0,0.12)");
+          shade.addColorStop(0.55, "rgba(0,0,0,0.08)");
+          shade.addColorStop(1, "rgba(0,0,0,0.78)");
+          ctx.fillStyle = shade;
+          ctx.fillRect(0, 0, width, height);
+        }
+
+        // CINEMATIC: hareketli ışık huzmesi
+        if (selectedStyle === "Cinematic") {
+          const lightX =
+            width * (-0.2 + p * 1.4);
+
+          const light = ctx.createLinearGradient(
+            lightX - width * 0.35,
+            0,
+            lightX + width * 0.35,
+            height
+          );
+
+          light.addColorStop(
+            0,
+            "rgba(255,255,255,0)"
+          );
+          light.addColorStop(
+            0.5,
+            "rgba(255,220,170,0.22)"
+          );
+          light.addColorStop(
+            1,
+            "rgba(255,255,255,0)"
+          );
+
+          ctx.fillStyle = light;
+          ctx.fillRect(0, 0, width, height);
+
+          const vignette = ctx.createRadialGradient(
+            width / 2,
+            height / 2,
+            width * 0.1,
+            width / 2,
+            height / 2,
+            width * 0.8
+          );
+
+          vignette.addColorStop(
+            0,
+            "rgba(0,0,0,0)"
+          );
+          vignette.addColorStop(
+            1,
+            "rgba(0,0,0,0.5)"
+          );
+
+          ctx.fillStyle = vignette;
+          ctx.fillRect(0, 0, width, height);
+        }
+
+        // NEON: renkli parlama ve ışık çizgileri
+        if (selectedStyle === "Neon") {
+          const pulse =
+            0.16 + Math.sin(time * 5) * 0.07;
+
+          const glow = ctx.createRadialGradient(
+            width * 0.5,
+            height * 0.5,
+            0,
+            width * 0.5,
+            height * 0.5,
+            width * 0.8
+          );
+
+          glow.addColorStop(
+            0,
+            `rgba(168,85,247,${pulse})`
+          );
+          glow.addColorStop(
+            1,
+            "rgba(0,200,255,0.04)"
+          );
+
+          ctx.fillStyle = glow;
+          ctx.fillRect(0, 0, width, height);
+
+          ctx.save();
+          ctx.strokeStyle = "#a855f7";
+          ctx.shadowColor = "#a855f7";
+          ctx.shadowBlur = 25;
+          ctx.lineWidth = Math.max(3, width * 0.006);
+
+          const offset =
+            Math.sin(time * 2) * width * 0.025;
+
+          ctx.strokeRect(
+            width * 0.07 + offset,
+            height * 0.055,
+            width * 0.86 - offset * 2,
+            height * 0.89
+          );
+
+          ctx.restore();
+        }
+
+        // SMOKE: hareketli yarı saydam sis bulutları
+        if (selectedStyle === "Smoke") {
+          ctx.save();
+
+          for (let i = 0; i < 13; i++) {
+            const x =
+              ((i * 0.19 + time * 0.018) % 1.4 -
+                0.2) *
+              width;
+
+            const y =
+              height *
+              (0.35 +
+                ((i * 0.113) % 0.65) -
+                time * 0.008);
+
+            const radius =
+              width * (0.18 + (i % 4) * 0.045);
+
+            const fog = ctx.createRadialGradient(
+              x,
+              y,
+              0,
+              x,
+              y,
+              radius
+            );
+
+            fog.addColorStop(
+              0,
+              "rgba(205,195,235,0.11)"
+            );
+            fog.addColorStop(
+              1,
+              "rgba(205,195,235,0)"
+            );
+
+            ctx.fillStyle = fog;
+            ctx.beginPath();
+            ctx.arc(x, y, radius, 0, Math.PI * 2);
+            ctx.fill();
+          }
+
+          ctx.restore();
+        }
+
+        // SPARKS: uçuşan kıvılcımlar
+        if (selectedStyle === "Sparks") {
+          ctx.save();
+          ctx.globalCompositeOperation = "screen";
+
+          for (const particle of particles) {
+            const x =
+              (particle.x +
+                Math.sin(time + particle.phase) *
+                  0.025) *
+              width;
+
+            const y =
+              (((particle.y -
+                time * particle.speed * 0.12) %
+                1) +
+                1) %
+              1 *
+              height;
+
+            const r =
+              particle.size * (width / 540);
+
+            ctx.beginPath();
+            ctx.fillStyle =
+              "rgba(255,190,70,0.9)";
+            ctx.shadowColor = "#ff9d00";
+            ctx.shadowBlur = 12;
+            ctx.arc(x, y, r, 0, Math.PI * 2);
+            ctx.fill();
+          }
+
+          ctx.restore();
+        }
+
+        // Metin animasyonu
+        const fadeIn = Math.min(p * 8, 1);
+        const fadeOut = Math.min((1 - p) * 8, 1);
+
+        ctx.save();
+        ctx.globalAlpha = Math.max(
+          0,
+          Math.min(fadeIn, fadeOut)
+        );
+
+        const fontSize = Math.round(width * 0.065);
+        ctx.font = `bold ${fontSize}px Arial, sans-serif`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillStyle = "#FFFFFF";
+
+        if (selectedStyle === "Neon") {
+          ctx.shadowColor = "#c084fc";
+          ctx.shadowBlur = 35;
+        } else if (selectedStyle === "Sparks") {
+          ctx.shadowColor = "#f59e0b";
+          ctx.shadowBlur = 24;
+        } else if (selectedStyle !== "Minimal") {
+          ctx.shadowColor = "#8B5CF6";
+          ctx.shadowBlur = 20;
+        }
+
+        const maxWidth = width * 0.84;
+        const words = caption.split(/\s+/);
+        const lines: string[] = [];
+        let currentLine = "";
+
+        for (const word of words) {
+          const candidate = currentLine
+            ? `${currentLine} ${word}`
+            : word;
+
+          if (
+            ctx.measureText(candidate).width >
+              maxWidth &&
+            currentLine
+          ) {
+            lines.push(currentLine);
+            currentLine = word;
+          } else {
+            currentLine = candidate;
+          }
+        }
+
+        if (currentLine) lines.push(currentLine);
+
+        const lineHeight = fontSize * 1.3;
+        const startY =
+          height * 0.78 -
+          ((lines.length - 1) * lineHeight) / 2;
+
+        lines.forEach((line, index) => {
+          ctx.fillText(
+            line,
+            width / 2,
+            startY + index * lineHeight,
+            maxWidth
+          );
+        });
+
+        ctx.restore();
+
+        ctx.save();
+        ctx.textAlign = "center";
+        ctx.font = `bold ${Math.round(
+          width * 0.023
+        )}px Arial`;
+        ctx.fillStyle = "rgba(255,255,255,0.75)";
+        ctx.fillText(
+          "HAGY AI CREATIVE STUDIO",
+          width / 2,
+          height * 0.95
+        );
+        ctx.restore();
       }
 
       stream = canvas.captureStream(30);
@@ -269,174 +607,6 @@ function Creator() {
         }
       );
 
-      const duration = Math.max(1, Number(seconds));
-      const width = canvas.width;
-      const height = canvas.height;
-      const caption = captionText.trim();
-
-      function drawFrame(elapsed: number) {
-        if (!ctx) return;
-
-        const p = Math.min(
-          elapsed / (duration * 1000),
-          1
-        );
-
-        const zoom = 1.05 + p * 0.13;
-
-        ctx.clearRect(0, 0, width, height);
-
-        ctx.fillStyle = "#09090F";
-        ctx.fillRect(0, 0, width, height);
-
-        const scale =
-          Math.max(
-            width / image.width,
-            height / image.height
-          ) * zoom;
-
-        const drawW = image.width * scale;
-        const drawH = image.height * scale;
-
-        const moveX =
-          Math.sin(p * Math.PI * 2) *
-          width *
-          0.018;
-
-        ctx.drawImage(
-          image,
-          (width - drawW) / 2 + moveX,
-          (height - drawH) / 2,
-          drawW,
-          drawH
-        );
-
-        const overlay = ctx.createLinearGradient(
-          0,
-          0,
-          0,
-          height
-        );
-
-        overlay.addColorStop(
-          0,
-          "rgba(9,9,15,0.15)"
-        );
-        overlay.addColorStop(
-          0.55,
-          "rgba(9,9,15,0.12)"
-        );
-        overlay.addColorStop(
-          1,
-          "rgba(9,9,15,0.85)"
-        );
-
-        ctx.fillStyle = overlay;
-        ctx.fillRect(0, 0, width, height);
-
-        const glow = ctx.createRadialGradient(
-          width * 0.5,
-          height * 0.5,
-          10,
-          width * 0.5,
-          height * 0.5,
-          width * 0.7
-        );
-
-        glow.addColorStop(
-          0,
-          "rgba(139,92,246,0.02)"
-        );
-        glow.addColorStop(
-          1,
-          "rgba(139,92,246,0.25)"
-        );
-
-        ctx.fillStyle = glow;
-        ctx.fillRect(0, 0, width, height);
-
-        const fadeIn = Math.min(p * 8, 1);
-        const fadeOut = Math.min(
-          (1 - p) * 8,
-          1
-        );
-
-        ctx.globalAlpha = Math.max(
-          0,
-          Math.min(fadeIn, fadeOut)
-        );
-
-        const fontSize = Math.round(
-          width * 0.065
-        );
-
-        ctx.font = `bold ${fontSize}px Arial, sans-serif`;
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillStyle = "#FFFFFF";
-        ctx.shadowColor = "#8B5CF6";
-        ctx.shadowBlur = 22;
-
-        const maxWidth = width * 0.84;
-        const words = caption.split(/\s+/);
-        const lines: string[] = [];
-        let currentLine = "";
-
-        for (const word of words) {
-          const candidate = currentLine
-            ? `${currentLine} ${word}`
-            : word;
-
-          if (
-            ctx.measureText(candidate).width >
-              maxWidth &&
-            currentLine
-          ) {
-            lines.push(currentLine);
-            currentLine = word;
-          } else {
-            currentLine = candidate;
-          }
-        }
-
-        if (currentLine) {
-          lines.push(currentLine);
-        }
-
-        const lineHeight = fontSize * 1.3;
-
-        const startY =
-          height * 0.78 -
-          ((lines.length - 1) *
-            lineHeight) /
-            2;
-
-        lines.forEach((line, index) => {
-          ctx.fillText(
-            line,
-            width / 2,
-            startY + index * lineHeight,
-            maxWidth
-          );
-        });
-
-        ctx.shadowBlur = 0;
-        ctx.globalAlpha = 1;
-
-        ctx.font = `bold ${Math.round(
-          width * 0.023
-        )}px Arial`;
-
-        ctx.fillStyle =
-          "rgba(255,255,255,0.75)";
-
-        ctx.fillText(
-          "HAGY AI CREATIVE STUDIO",
-          width / 2,
-          height * 0.95
-        );
-      }
-
       drawFrame(0);
       recorder.start(250);
 
@@ -455,38 +625,28 @@ function Creator() {
             Math.min(
               99,
               Math.round(
-                (elapsed /
-                  (duration * 1000)) *
-                  100
+                (elapsed / (duration * 1000)) * 100
               )
             )
           );
 
-          if (
-            elapsed <
-            duration * 1000
-          ) {
-            frameId =
-              requestAnimationFrame(animate);
+          if (elapsed < duration * 1000) {
+            frameId = requestAnimationFrame(animate);
           } else {
             resolve();
           }
         }
 
-        frameId =
-          requestAnimationFrame(animate);
+        frameId = requestAnimationFrame(animate);
       });
 
       recorder.stop();
 
       const videoBlob = await completed;
-      const url =
-        URL.createObjectURL(videoBlob);
+      const url = URL.createObjectURL(videoBlob);
 
       if (videoUrlRef.current) {
-        URL.revokeObjectURL(
-          videoUrlRef.current
-        );
+        URL.revokeObjectURL(videoUrlRef.current);
       }
 
       videoUrlRef.current = url;
@@ -499,19 +659,11 @@ function Creator() {
           ? err.message
           : "Video oluşturulamadı."
       );
-
       setStatus("error");
     } finally {
       cancelAnimationFrame(frameId);
-
-      stream
-        ?.getTracks()
-        .forEach((track) => track.stop());
-
-      if (objectUrl) {
-        URL.revokeObjectURL(objectUrl);
-      }
-
+      stream?.getTracks().forEach((track) => track.stop());
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
       renderingRef.current = false;
     }
   }
@@ -525,7 +677,6 @@ function Creator() {
               ? "Stüdyonu Seç"
               : "Choose Your Studio"}
           </h2>
-
           <p className="mt-2 text-white/60">
             {lang === "tr"
               ? "Ne tür bir video hazırlamak istiyorsun?"
@@ -541,23 +692,18 @@ function Creator() {
               <button
                 type="button"
                 key={item.id}
-                onClick={() =>
-                  chooseStudio(item.id)
-                }
+                onClick={() => chooseStudio(item.id)}
                 className="card group p-7 text-left transition-all hover:border-violet hover:bg-violet/10"
               >
                 <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-violet/20 text-violet">
                   <Icon size={28} />
                 </div>
-
                 <h3 className="text-xl font-bold">
                   {item.name[lang]}
                 </h3>
-
                 <p className="mt-3 text-sm leading-6 text-white/60">
                   {item.desc[lang]}
                 </p>
-
                 <span className="mt-5 inline-block text-sm font-semibold text-violet">
                   {lang === "tr"
                     ? "Stüdyoya Gir →"
@@ -570,8 +716,8 @@ function Creator() {
 
         <p className="mt-7 text-center text-xs text-white/50">
           {lang === "tr"
-            ? "Şu anda tüm stüdyolar ücretsiz temel video motorunu kullanır. Gelişmiş AI özellikleri henüz aktif değildir."
-            : "All studios currently use the free basic video engine. Advanced AI features are not active yet."}
+            ? "Stüdyolar şu anda tarayıcı tabanlı efekt motorunu kullanır. Gerçek AI video üretimi henüz aktif değildir."
+            : "Studios currently use browser-based effects. Real AI video generation is not active yet."}
         </p>
       </div>
     );
@@ -581,27 +727,19 @@ function Creator() {
     return (
       <div className="card mx-auto max-w-xl p-8 text-center">
         <Loader2 className="mx-auto animate-spin text-violet" />
-
         <h2 className="mt-4 font-bold">
           HAGY video oluşturuyor...
         </h2>
-
         <p className="mt-2 text-sm text-white/60">
           İşlem sırasında bu sekmeyi açık tut.
         </p>
-
         <div className="mt-5 h-2 overflow-hidden rounded bg-white/10">
           <div
             className="h-full bg-violet transition-all"
-            style={{
-              width: `${progress}%`,
-            }}
+            style={{ width: `${progress}%` }}
           />
         </div>
-
-        <p className="mt-2 text-sm">
-          {progress}%
-        </p>
+        <p className="mt-2 text-sm">{progress}%</p>
       </div>
     );
   }
@@ -610,7 +748,6 @@ function Creator() {
     return (
       <div className="card mx-auto max-w-xl p-6 text-center">
         <CheckCircle2 className="mx-auto text-green-400" />
-
         <h2 className="mt-3 text-xl font-bold">
           Videon hazır!
         </h2>
@@ -648,11 +785,7 @@ function Creator() {
     return (
       <div className="card mx-auto max-w-xl p-8 text-center">
         <AlertTriangle className="mx-auto text-pink" />
-
-        <p className="mt-3">
-          {error}
-        </p>
-
+        <p className="mt-3">{error}</p>
         <button
           type="button"
           className="btn-primary mt-4"
@@ -681,7 +814,6 @@ function Creator() {
         <h2 className="font-bold">
           {activeStudio?.name[lang]}
         </h2>
-
         <p className="mt-1 text-xs text-white/60">
           {activeStudio?.desc[lang]}
         </p>
@@ -693,33 +825,28 @@ function Creator() {
       >
         <p className="rounded-lg border border-violet/40 bg-violet/10 p-3 text-xs text-white/80">
           {lang === "tr"
-            ? "Ücretsiz temel video motoru aktif. Gerçek AI karakter animasyonu ve gelişmiş edit motorları henüz bağlı değil."
-            : "Free basic video engine is active. Real AI character animation and advanced editing engines are not connected yet."}
+            ? "Sinematik efekt motoru aktif. Fotoğrafına seçtiğin stile göre ışık, sis, neon veya kıvılcım efektleri uygulanır. Gerçek AI karakter animasyonu henüz aktif değildir."
+            : "Cinematic effects engine is active. Lighting, fog, neon or sparks are applied to your photo. Real AI character animation is not active yet."}
         </p>
 
         <div>
           <label className="label" htmlFor="f">
             {t("cr.upload")}
           </label>
-
           <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-dashed border-white/20 p-4 text-sm text-white/70 hover:border-violet">
             <Upload size={18} />
-
             <span className="break-all">
               {file
                 ? file.name
                 : "JPG, PNG, WebP — Maksimum 3 MB"}
             </span>
-
             <input
               id="f"
               type="file"
               accept="image/jpeg,image/png,image/webp"
               className="hidden"
               onChange={(e) => {
-                setFile(
-                  e.target.files?.[0] ?? null
-                );
+                setFile(e.target.files?.[0] ?? null);
                 setError("");
               }}
             />
@@ -730,20 +857,14 @@ function Creator() {
           <label className="label" htmlFor="t">
             {t("cr.template")}
           </label>
-
           <select
             id="t"
             className="input"
             value={tplId}
-            onChange={(e) =>
-              setTplId(e.target.value)
-            }
+            onChange={(e) => setTplId(e.target.value)}
           >
             {filteredTemplates.map((item) => (
-              <option
-                key={item.id}
-                value={item.id}
-              >
+              <option key={item.id} value={item.id}>
                 {item.name[lang]}
               </option>
             ))}
@@ -751,10 +872,7 @@ function Creator() {
         </div>
 
         <div>
-          <span className="label">
-            {t("cr.style")}
-          </span>
-
+          <span className="label">{t("cr.style")}</span>
           <Pills
             items={effects}
             value={style}
@@ -766,7 +884,6 @@ function Creator() {
           <span className="label">
             {t("cr.duration")}
           </span>
-
           <Pills
             items={durations}
             value={seconds}
@@ -775,10 +892,7 @@ function Creator() {
         </div>
 
         <div>
-          <span className="label">
-            {t("cr.ratio")}
-          </span>
-
+          <span className="label">{t("cr.ratio")}</span>
           <Pills
             items={ratios}
             value={ratio}
@@ -790,23 +904,17 @@ function Creator() {
           <label className="label" htmlFor="x">
             {t("cr.text")}
           </label>
-
           <input
             id="x"
             className="input"
             value={captionText}
-            onChange={(e) =>
-              setCaptionText(e.target.value)
-            }
+            onChange={(e) => setCaptionText(e.target.value)}
             maxLength={40}
           />
         </div>
 
         {error && (
-          <p
-            role="alert"
-            className="text-sm text-pink"
-          >
+          <p role="alert" className="text-sm text-pink">
             {error}
           </p>
         )}
@@ -831,7 +939,6 @@ export default function Create() {
       <h1 className="mb-8 text-center text-3xl font-bold">
         {t("cr.title")}
       </h1>
-
       <Suspense fallback={null}>
         <Creator />
       </Suspense>
