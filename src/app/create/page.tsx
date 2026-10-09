@@ -14,12 +14,14 @@ import { useI18n } from "@/lib/i18n";
 
 type Status = "idle" | "uploading" | "done" | "error";
 
+const MAX_FILE_SIZE = 3 * 1024 * 1024;
+
 function Pills<T extends string | number>({
   items,
   value,
   set,
 }: {
-  items: T[];
+  items: readonly T[];
   value: T;
   set: (v: T) => void;
 }) {
@@ -72,14 +74,16 @@ function Creator() {
       return;
     }
 
-    if (!file.type.startsWith("image/") &&
-        !file.type.startsWith("video/")) {
-      setError("Lütfen görsel veya video seç.");
+    if (
+      !file.type.startsWith("image/") &&
+      !file.type.startsWith("video/")
+    ) {
+      setError("Lütfen geçerli bir görsel veya video seç.");
       return;
     }
 
-    if (file.size > 10 * 1024 * 1024) {
-      setError("Dosya en fazla 10 MB olabilir.");
+    if (file.size === 0 || file.size > MAX_FILE_SIZE) {
+      setError("Dosya boş olmamalı ve en fazla 3 MB olabilir.");
       return;
     }
 
@@ -104,13 +108,21 @@ function Creator() {
       const result = await response.json();
 
       if (!response.ok) {
-        throw new Error(result.error || "İşlem başarısız.");
+        throw new Error(
+          result.error || "Dosya gönderilemedi."
+        );
+      }
+
+      if (result.uploadValidated !== true) {
+        throw new Error("Dosya doğrulaması tamamlanamadı.");
       }
 
       setStatus("done");
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "Bir hata oluştu."
+        err instanceof Error
+          ? err.message
+          : "Beklenmeyen bir hata oluştu."
       );
       setStatus("error");
     }
@@ -120,7 +132,9 @@ function Creator() {
     return (
       <div className="card mx-auto max-w-xl p-8 text-center">
         <Loader2 className="mx-auto animate-spin text-violet" />
-        <p className="mt-4">Dosya sunucuya gönderiliyor...</p>
+        <p className="mt-4">
+          Dosya sunucuya gönderiliyor...
+        </p>
       </div>
     );
   }
@@ -129,14 +143,24 @@ function Creator() {
     return (
       <div className="card mx-auto max-w-xl p-8 text-center">
         <CheckCircle2 className="mx-auto text-green-400" />
-        <h2 className="mt-3 font-bold">İstek kabul edildi!</h2>
+
+        <h2 className="mt-3 font-bold">
+          Dosya başarıyla doğrulandı!
+        </h2>
+
         <p className="mt-3 text-sm text-white/70">
-          Video oluşturma motoru henüz bağlı değil.
-          Bu aşamada yalnızca yükleme altyapısını test ediyoruz.
+          Dosya sunucu tarafından kontrol edildi.
+          Henüz kaydedilmedi ve video oluşturulmadı.
+          Video düzenleme motorunu sonraki aşamada bağlayacağız.
         </p>
+
         <button
+          type="button"
           className="btn-primary mt-4 w-full"
-          onClick={() => setStatus("idle")}
+          onClick={() => {
+            setStatus("idle");
+            setError("");
+          }}
         >
           {t("cr.reset")}
         </button>
@@ -148,10 +172,18 @@ function Creator() {
     return (
       <div className="card mx-auto max-w-xl p-8 text-center">
         <AlertTriangle className="mx-auto text-pink" />
-        <p className="mt-3">{error || t("cr.fail")}</p>
+
+        <p className="mt-3">
+          {error || t("cr.fail")}
+        </p>
+
         <button
+          type="button"
           className="btn-primary mt-4"
-          onClick={() => setStatus("idle")}
+          onClick={() => {
+            setStatus("idle");
+            setError("");
+          }}
         >
           {t("cr.reset")}
         </button>
@@ -172,17 +204,25 @@ function Creator() {
         <label className="label" htmlFor="f">
           {t("cr.upload")}
         </label>
+
         <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-dashed border-white/20 p-4 text-sm text-white/70 hover:border-violet">
           <Upload size={18} />
-          {file ? file.name : "PNG, JPG, MP4 — Maksimum 10 MB"}
+
+          <span className="break-all">
+            {file
+              ? file.name
+              : "PNG, JPG, MP4 — Maksimum 3 MB"}
+          </span>
+
           <input
             id="f"
             type="file"
             accept="image/*,video/*"
             className="hidden"
-            onChange={(e) =>
-              setFile(e.target.files?.[0] ?? null)
-            }
+            onChange={(e) => {
+              setFile(e.target.files?.[0] ?? null);
+              setError("");
+            }}
           />
         </label>
       </div>
@@ -191,6 +231,7 @@ function Creator() {
         <label className="label" htmlFor="t">
           {t("cr.template")}
         </label>
+
         <select
           id="t"
           className="input"
@@ -206,24 +247,46 @@ function Creator() {
       </div>
 
       <div>
-        <span className="label">{t("cr.style")}</span>
-        <Pills items={effects} value={style} set={setStyle} />
+        <span className="label">
+          {t("cr.style")}
+        </span>
+
+        <Pills
+          items={effects}
+          value={style}
+          set={setStyle}
+        />
       </div>
 
       <div>
-        <span className="label">{t("cr.duration")}</span>
-        <Pills items={durations} value={seconds} set={setSeconds} />
+        <span className="label">
+          {t("cr.duration")}
+        </span>
+
+        <Pills
+          items={durations}
+          value={seconds}
+          set={setSeconds}
+        />
       </div>
 
       <div>
-        <span className="label">{t("cr.ratio")}</span>
-        <Pills items={ratios} value={ratio} set={setRatio} />
+        <span className="label">
+          {t("cr.ratio")}
+        </span>
+
+        <Pills
+          items={ratios}
+          value={ratio}
+          set={setRatio}
+        />
       </div>
 
       <div>
         <label className="label" htmlFor="x">
           {t("cr.text")}
         </label>
+
         <input
           id="x"
           className="input"
@@ -239,7 +302,10 @@ function Creator() {
         </p>
       )}
 
-      <button type="submit" className="btn-primary w-full">
+      <button
+        type="submit"
+        className="btn-primary w-full"
+      >
         {t("cr.submit")}
       </button>
     </form>
@@ -254,6 +320,7 @@ export default function Create() {
       <h1 className="mb-8 text-center text-3xl font-bold">
         {t("cr.title")}
       </h1>
+
       <Suspense fallback={null}>
         <Creator />
       </Suspense>
