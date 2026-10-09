@@ -11,38 +11,33 @@ const SPACE =
 export async function POST(request: NextRequest) {
   try {
     const form = await request.formData();
-
     const image = form.get("image");
     const prompt = String(form.get("prompt") || "").trim();
 
     if (!(image instanceof File)) {
       return NextResponse.json(
-        { error: "Fotograf yuklemelisin." },
+        { error: "Lütfen bir fotoğraf yükle." },
         { status: 400 }
       );
     }
 
-    if (
-      !["image/png", "image/jpeg", "image/webp"].includes(
-        image.type
-      )
-    ) {
+    if (!["image/jpeg", "image/png", "image/webp"].includes(image.type)) {
       return NextResponse.json(
-        { error: "JPG, PNG veya WebP yuklemelisin." },
+        { error: "JPG, PNG veya WEBP yüklemelisin." },
         { status: 400 }
       );
     }
 
     if (image.size > 3 * 1024 * 1024) {
       return NextResponse.json(
-        { error: "Fotograf en fazla 3 MB olabilir." },
+        { error: "Fotoğraf en fazla 3 MB olabilir." },
         { status: 400 }
       );
     }
 
     if (!prompt) {
       return NextResponse.json(
-        { error: "Video promptu yazmalisin." },
+        { error: "Video açıklaması yazmalısın." },
         { status: 400 }
       );
     }
@@ -52,7 +47,7 @@ export async function POST(request: NextRequest) {
     const result = await client.predict("/generate_video", {
       input_image: await handle_file(image),
       last_image: null,
-      prompt: prompt,
+      prompt,
       steps: 4,
       negative_prompt:
         "blurry, low quality, deformed, watermark, bad anatomy, shaky camera",
@@ -66,43 +61,88 @@ export async function POST(request: NextRequest) {
       flow_shift: 3,
       frame_multiplier: 16,
       safe_mode: false,
-      video_component: true
+      video_component: true,
     });
 
-    const data = result.data as Array<{
-      url?: string;
-      path?: string;
-    } | null>;
+    const data = result.data as Array<unknown>;
 
-    const videoUrl =
-      data?.[0]?.url || data?.[1]?.url;
+    function getUrl(value: unknown): string | null {
+      if (!value || typeof value !== "object") return null;
 
-    if (!videoUrl) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "AI video olusturdu ancak video adresi alinamadi."
-        },
-        { status: 502 }
-      );
+      const item = value as {
+        url?: string;
+        video?: { url?: string };
+      };
+
+      return item.url || item.video?.url || null;
     }
 
-    return NextResponse.json({
-      success: true,
-      model: "Wan 2.2 Lightning",
-      videoUrl
-    });
+    const generatedVideoUrl = getUrl(data?.[0]);
+    const downloadVideoUrl = getUrl(data?.[1]);
 
+    async function checkUrl(url: string | null) {
+      if (!url) {
+        return { available: false, status: null };
+      }
+
+      try {
+        const response = await fetch(url, {
+          method: "GET",
+          headers: { Range: "bytes=0-1023" },
+          cache: "no-store",
+          signal: AbortSignal.timeout(10000),
+        });
+
+        await response.body?.cancel();
+
+        return {
+          available: response.ok,
+          status: response.status,
+        };
+      } catch {
+        return {
+          available: false,
+          status: null,
+        };
+      }
+    }
+
+    const [generatedCheck, downloadCheck] = await Promise.all([
+      checkUrl(generatedVideoUrl),
+      checkUrl(downloadVideoUrl),
+    ]);
+
+    const workingUrl = downloadCheck.available
+      ? downloadVideoUrl
+      : generatedCheck.available
+        ? generatedVideoUrl
+        : null;
+
+    return NextResponse.json({
+      success: Boolean(workingUrl),
+      model: "Wan 2.2 Lightning",
+      videoUrl: workingUrl,
+      generatedVideo: {
+        url: generatedVideoUrl,
+        ...generatedCheck,
+      },
+      downloadVideo: {
+        url: downloadVideoUrl,
+        ...downloadCheck,
+      },
+      error: workingUrl
+        ? null
+        : "Video bağlantılarına erişilemiyor. İki çıktı da kontrol edildi.",
+    });
   } catch (error) {
-    console.error("WAN AI ERROR:", error);
+    console.error("WAN GENERATE ERROR:", error);
 
     return NextResponse.json(
       {
-        success: false,
         error:
           error instanceof Error
             ? error.message
-            : "AI video uretimi sirasinda hata olustu."
+            : "Video oluşturulurken hata oluştu.",
       },
       { status: 500 }
     );
