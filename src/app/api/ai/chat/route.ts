@@ -1,20 +1,99 @@
 
 import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
 export async function POST(request: NextRequest) {
   try {
     const apiKey = process.env.OPENAI_API_KEY;
 
-    if (!apiKey) {
+    if (!apiKey || !supabaseUrl || !supabaseAnonKey) {
       return NextResponse.json(
-        { error: "AI servisi yapılandırılmamış." },
+        { error: "Servis yapılandırması eksik." },
         { status: 503 }
       );
     }
 
-    const body = await request.json();
+    // Kullanıcının oturum token'ını kontrol et
+    const authorization = request.headers.get("authorization");
+
+    if (!authorization?.startsWith("Bearer ")) {
+      return NextResponse.json(
+        { error: "Oturum açmanız gerekiyor." },
+        { status: 401 }
+      );
+    }
+
+    const token = authorization.slice(7).trim();
+
+    const supabase = createClient(
+      supabaseUrl,
+      supabaseAnonKey,
+      {
+        global: {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
+        auth: {
+          persistSession: false,
+          autoRefreshToken: false,
+        },
+      }
+    );
+
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser(token);
+
+    if (authError || !user) {
+      return NextResponse.json(
+        { error: "Geçersiz oturum." },
+        { status: 401 }
+      );
+    }
+
+    // Super Admin kontrolü
+    const { data: isAdmin, error: adminError } =
+      await supabase.rpc("is_business_admin");
+
+    if (adminError) {
+      return NextResponse.json(
+        { error: "Yetki kontrolü yapılamadı." },
+        { status: 503 }
+      );
+    }
+
+    if (isAdmin !== true) {
+      // İşletme başvurusunun onay durumunu kontrol et
+      const { data: application, error: applicationError } =
+        await supabase
+          .from("business_applications")
+          .select("status")
+          .eq("user_id", user.id)
+          .maybeSingle();
+
+      if (applicationError) {
+        return NextResponse.json(
+          { error: "Başvuru durumu kontrol edilemedi." },
+          { status: 503 }
+        );
+      }
+
+      if (application?.status !== "approved") {
+        return NextResponse.json(
+          { error: "İşletme hesabınız henüz onaylanmadı." },
+          { status: 403 }
+        );
+      }
+    }
+
+    const body = await request.json().catch(() => null);
     const message = body?.message;
 
     if (
@@ -23,7 +102,7 @@ export async function POST(request: NextRequest) {
       message.length > 2000
     ) {
       return NextResponse.json(
-        { error: "Geçerli bir mesaj gönderin." },
+        { error: "Mesaj 1-2000 karakter arasında olmalıdır." },
         { status: 400 }
       );
     }
@@ -39,7 +118,7 @@ export async function POST(request: NextRequest) {
         body: JSON.stringify({
           model: "gpt-4.1-mini",
           instructions:
-            "Sen Hagy Business platformunun profesyonel Türkçe AI asistanısın. İşletmelere müşteri ilişkileri, görev planlama, satış, pazarlama ve iş süreçlerinde yardımcı ol. Bilmediğin işletme verilerini uydurma. Kısa, açık ve faydalı yanıtlar ver.",
+            "Sen Hagy Business platformunun profesyonel Türkçe AI asistanısın. İşletmelere satış, pazarlama, müşteri ilişkileri, görev planlama ve iş süreçlerinde yardımcı ol. Erişimin olmayan işletme verilerini uydurma. Kısa, açık ve faydalı yanıtlar ver.",
           input: message.trim(),
           max_output_tokens: 600,
         }),
@@ -47,7 +126,7 @@ export async function POST(request: NextRequest) {
     );
 
     if (!response.ok) {
-      console.error("OpenAI API error:", response.status);
+      console.error("OpenAI API status:", response.status);
 
       return NextResponse.json(
         { error: "AI yanıtı alınamadı." },
@@ -58,9 +137,18 @@ export async function POST(request: NextRequest) {
     const data = await response.json();
 
     const answer = (data.output ?? [])
-      .flatMap((item: any) => item.content ?? [])
-      .filter((item: any) => item.type === "output_text")
-      .map((item: any) => item.text)
+      .flatMap(
+        (item: { content?: Array<{ type: string; text?: string }> }) =>
+          item.content ?? []
+      )
+      .filter(
+        (item: { type: string }) =>
+          item.type === "output_text"
+      )
+      .map(
+        (item: { text?: string }) =>
+          item.text ?? ""
+      )
       .join("\n");
 
     return NextResponse.json({
