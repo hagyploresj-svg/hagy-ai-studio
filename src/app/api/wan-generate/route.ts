@@ -23,12 +23,9 @@ function getVideoUrl(value: unknown): string | null {
   }
 
   const file = value as VideoFile;
-
   const candidate = file.url || file.video?.url;
 
-  if (!candidate) {
-    return null;
-  }
+  if (!candidate) return null;
 
   try {
     const parsed = new URL(candidate);
@@ -76,6 +73,21 @@ async function checkVideoUrl(url: string | null) {
       status: null,
     };
   }
+}
+
+function isTemporaryError(error: unknown): boolean {
+  const message =
+    error instanceof Error
+      ? error.message
+      : String(error);
+
+  return (
+    message.includes("File not allowed") ||
+    message.includes("503") ||
+    message.includes("502") ||
+    message.includes("temporarily") ||
+    message.includes("timeout")
+  );
 }
 
 export async function POST(request: NextRequest) {
@@ -143,57 +155,78 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Gradio istemcisine bağlan.
-    const client = await Client.connect(SPACE);
+    let lastError: unknown = null;
 
-    // Wan 2.2 Lightning ile video oluştur.
-    const result = await client.predict("/generate_video", {
-      input_image: await handle_file(image),
-      last_image: null,
-      prompt,
-      steps: 4,
-      negative_prompt:
-        "blurry, low quality, deformed, watermark, bad anatomy, shaky camera",
-      duration_seconds: duration,
-      guidance_scale: 1,
-      guidance_scale_2: 1,
-      seed: 42,
-      randomize_seed: true,
-      quality: 5,
-      scheduler: "UniPCMultistep",
-      flow_shift: 3,
-      frame_multiplier: 16,
-      safe_mode: false,
-      video_component: true,
-    });
+    // Geçici Gradio hatasında en fazla 2 deneme.
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        console.log(
+          `WAN GENERATE ATTEMPT ${attempt}`
+        );
 
-    const data = result.data as unknown[];
+        const client = await Client.connect(SPACE);
 
-    // Birinci çıktı: oynatılabilir video
-    const generatedVideoUrl = getVideoUrl(data?.[0]);
+        const result = await client.predict(
+          "/generate_video",
+          {
+            input_image: await handle_file(image),
+            last_image: null,
+            prompt,
+            steps: 4,
+            negative_prompt:
+              "blurry, low quality, deformed, watermark, bad anatomy, shaky camera",
+            duration_seconds: duration,
+            guidance_scale: 1,
+            guidance_scale_2: 1,
+            seed: 42,
+            randomize_seed: true,
+            quality: 5,
+            scheduler: "UniPCMultistep",
+            flow_shift: 3,
+            frame_multiplier: 16,
+            safe_mode: false,
+            video_component: true,
+          }
+        );
 
-    // İkinci çıktı: indirilebilir video
-    const downloadVideoUrl = getVideoUrl(data?.[1]);
+        const data = result.data as unknown[];
 
-    const [generatedCheck, downloadCheck] =
-      await Promise.all([
-        checkVideoUrl(generatedVideoUrl),
-        checkVideoUrl(downloadVideoUrl),
-      ]);
+        const generatedVideoUrl = getVideoUrl(
+          data?.[0]
+        );
 
-    const workingUrl = downloadCheck.available
-      ? downloadVideoUrl
-      : generatedCheck.available
-        ? generatedVideoUrl
-        : null;
+        const downloadVideoUrl = getVideoUrl(
+          data?.[1]
+        );
 
-    if (!workingUrl) {
-      return NextResponse.json(
-        {
-          success: false,
+        const [generatedCheck, downloadCheck] =
+          await Promise.all([
+            checkVideoUrl(generatedVideoUrl),
+            checkVideoUrl(downloadVideoUrl),
+          ]);
+
+        const workingUrl = downloadCheck.available
+          ? downloadVideoUrl
+          : generatedCheck.available
+            ? generatedVideoUrl
+            : null;
+
+        if (!workingUrl) {
+          lastError = new Error(
+            "Video üretildi ancak Hugging Face dosya erişimine izin vermedi."
+          );
+
+          // Tekrar üretmek yerine açık hata döndür.
+          // Böylece gereksiz GPU kullanımı önlenir.
+          break;
+        }
+
+        return NextResponse.json({
+          success: true,
           model: "Wan 2.2 Lightning",
-          error:
-            "AI video oluşturulmuş olabilir ancak Hugging Face dosyaya erişim izni vermiyor. Lütfen tekrar dene.",
+          duration,
+          videoUrl: workingUrl,
+          attempts: attempt,
           generatedVideo: {
             url: generatedVideoUrl,
             ...generatedCheck,
@@ -202,25 +235,42 @@ export async function POST(request: NextRequest) {
             url: downloadVideoUrl,
             ...downloadCheck,
           },
-        },
-        { status: 502 }
-      );
+        });
+      } catch (error) {
+        lastError = error;
+
+        console.error(
+          `WAN ATTEMPT ${attempt} ERROR:`,
+          error
+        );
+
+        if (
+          !isTemporaryError(error) ||
+          attempt === 2
+        ) {
+          break;
+        }
+
+        // Kısa bekleme sonrası tekrar dene.
+        await new Promise((resolve) =>
+          setTimeout(resolve, 1500)
+        );
+      }
     }
 
-    return NextResponse.json({
-      success: true,
-      model: "Wan 2.2 Lightning",
-      duration,
-      videoUrl: workingUrl,
-      generatedVideo: {
-        url: generatedVideoUrl,
-        ...generatedCheck,
+    console.error(
+      "WAN GENERATION FAILED:",
+      lastError
+    );
+
+    return NextResponse.json(
+      {
+        success: false,
+        error:
+          "Video servisi şu anda dosyaya erişemiyor. Lütfen biraz sonra tekrar dene.",
       },
-      downloadVideo: {
-        url: downloadVideoUrl,
-        ...downloadCheck,
-      },
-    });
+      { status: 502 }
+    );
   } catch (error) {
     console.error("WAN GENERATE ERROR:", error);
 
