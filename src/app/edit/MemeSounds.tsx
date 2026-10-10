@@ -1,14 +1,14 @@
 
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
-  Loader2,
   Play,
   Pause,
   Plus,
   Search,
   ExternalLink,
+  Volume2,
 } from "lucide-react";
 
 export type MemeSound = {
@@ -20,259 +20,334 @@ export type MemeSound = {
   category: string;
 };
 
-type ApiSound = {
-  slug?: string;
-  title?: string;
-  mp3_url?: string;
-  page_url?: string;
-  duration_ms?: number;
-  license?: string;
+type MemeItem = {
+  id: string;
+  name: string;
+  emoji: string;
+  url: string;
+  tags: string;
 };
 
-const memes = [
-  { name: "Vine Boom", emoji: "💀", query: "deep dramatic bass impact boom" },
-  { name: "Bruh", emoji: "😂", query: "funny disappointed reaction voice" },
-  { name: "Metal Pipe", emoji: "🔩", query: "metal pipe falling clang" },
-  { name: "Boing", emoji: "🤡", query: "cartoon boing spring" },
-  { name: "Fail Trombone", emoji: "🎺", query: "sad trombone failure" },
-  { name: "Airhorn", emoji: "📢", query: "air horn loud" },
-  { name: "Bonk", emoji: "🔨", query: "cartoon bonk hit" },
-  { name: "Fart", emoji: "💨", query: "funny fart" },
-  { name: "Laugh", emoji: "🤣", query: "funny laughter crowd" },
-  { name: "Record Scratch", emoji: "💿", query: "vinyl record scratch" },
-  { name: "Suspense", emoji: "😳", query: "dramatic suspense sting" },
-  { name: "Game Over", emoji: "🎮", query: "retro game over" },
-  { name: "Victory", emoji: "🏆", query: "video game victory fanfare" },
-  { name: "Cartoon Fall", emoji: "😵", query: "cartoon falling whistle crash" },
-  { name: "Wow", emoji: "😮", query: "surprised reaction wow" },
-  { name: "Notification", emoji: "🎁", query: "funny notification pop chime" },
-  { name: "Drum Joke", emoji: "🥁", query: "comedy drum rimshot" },
-  { name: "Scream", emoji: "😱", query: "cartoon scream" },
-  { name: "Error", emoji: "❌", query: "retro error buzzer" },
-  { name: "Dramatic Hit", emoji: "🔥", query: "cinematic dramatic hit" },
+const BASE = "https://www.myinstants.com/media/sounds/";
+
+const MEMES: MemeItem[] = [
+  {
+    id: "vine-boom",
+    name: "Vine Boom",
+    emoji: "💀",
+    url: BASE + "vine-boom.mp3",
+    tags: "boom bass dramatic shock",
+  },
+  {
+    id: "bruh",
+    name: "Bruh",
+    emoji: "😂",
+    url: BASE + "movie_1.mp3",
+    tags: "bruh reaction funny",
+  },
+  {
+    id: "sad-trombone",
+    name: "Sad Trombone",
+    emoji: "🎺",
+    url: BASE + "sadtrombone.mp3",
+    tags: "fail sad trombone",
+  },
+  {
+    id: "fbi-open-up",
+    name: "FBI Open Up",
+    emoji: "🚨",
+    url: BASE + "fbi-open-up-sfx.mp3",
+    tags: "fbi open up police meme",
+  },
+  {
+    id: "mission-failed",
+    name: "Mission Failed",
+    emoji: "🎮",
+    url:
+      BASE +
+      "mission-failed-we-ll-get-em-next-time.mp3",
+    tags: "mission failed game",
+  },
+  {
+    id: "directed-by",
+    name: "Directed by Robert B. Weide",
+    emoji: "🎬",
+    url:
+      BASE +
+      "directed-by-robert-b_gE1sT6P.mp3",
+    tags: "directed by robert weide credits",
+  },
+  {
+    id: "windows-error",
+    name: "Windows XP Error",
+    emoji: "❌",
+    url: BASE + "erro.mp3",
+    tags: "windows error computer",
+  },
+  {
+    id: "oh-no-laugh",
+    name: "Oh No No No Laugh",
+    emoji: "🤣",
+    url:
+      BASE +
+      "oh-no-no-no-tik-tok-laugh.mp3",
+    tags: "oh no laugh tiktok funny",
+  },
+  {
+    id: "nokia-arabic",
+    name: "Nokia Arabic Ringtone",
+    emoji: "📱",
+    url: BASE + "nokia-arabic-ringtone.mp3",
+    tags: "nokia arabic ringtone",
+  },
+  {
+    id: "few-moments",
+    name: "A Few Moments Later",
+    emoji: "⏳",
+    url:
+      BASE +
+      "a-few-moments-later-hd.mp3",
+    tags: "spongebob moments later time",
+  },
 ];
+
+const SOURCE_SEARCH =
+  "https://www.myinstants.com/en/search/?name=";
 
 export default function MemeSounds({
   onAdd,
 }: {
   onAdd: (sound: MemeSound) => void;
 }) {
-  const [selected, setSelected] = useState(memes[0]);
-  const [searchText, setSearchText] = useState("");
-  const [sounds, setSounds] = useState<MemeSound[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [query, setQuery] = useState("");
+  const [playing, setPlaying] = useState<
+    string | null
+  >(null);
   const [error, setError] = useState("");
-  const [playingId, setPlayingId] = useState<string | null>(null);
+  const [durations, setDurations] = useState<
+    Record<string, number>
+  >({});
 
-  const [audio] = useState<HTMLAudioElement | null>(
-    () => (typeof window !== "undefined" ? new Audio() : null)
+  const audioRef = useRef<HTMLAudioElement | null>(
+    null
   );
 
   useEffect(() => {
     return () => {
-      audio?.pause();
-      if (audio) audio.src = "";
+      audioRef.current?.pause();
+      audioRef.current = null;
     };
-  }, [audio]);
+  }, []);
 
-  useEffect(() => {
-    const controller = new AbortController();
+  const filtered = MEMES.filter((item) => {
+    const text = query.trim().toLowerCase();
 
-    async function load() {
-      setLoading(true);
-      setError("");
-      setSounds([]);
-      setPlayingId(null);
-      audio?.pause();
+    return (
+      !text ||
+      item.name.toLowerCase().includes(text) ||
+      item.tags.toLowerCase().includes(text)
+    );
+  });
 
-      try {
-        const term = searchText.trim() || selected.query;
-
-        const url =
-          "https://sfxmint.com/api/v1/search?q=" +
-          encodeURIComponent(term) +
-          "&limit=20";
-
-        const response = await fetch(url, {
-          signal: controller.signal,
-        });
-
-        if (!response.ok) {
-          throw new Error("Ses servisi yanıt vermedi.");
-        }
-
-        const data: unknown = await response.json();
-
-        const items: ApiSound[] = Array.isArray(data)
-          ? data
-          : typeof data === "object" &&
-              data !== null &&
-              "candidates" in data &&
-              Array.isArray(data.candidates)
-            ? data.candidates
-            : [];
-
-        const result: MemeSound[] = items
-          .filter(
-            (item) =>
-              item.slug &&
-              item.mp3_url &&
-              (!item.license ||
-                item.license.toUpperCase().startsWith("CC0"))
-          )
-          .map((item) => ({
-            id: `meme-${item.slug}`,
-            name: item.title || item.slug || "Meme Sound",
-            url: item.mp3_url!,
-            duration: Math.max(
-              0.1,
-              (item.duration_ms || 1000) / 1000
-            ),
-            source:
-              item.page_url ||
-              `https://sfxmint.com/sounds/${item.slug}`,
-            category: "Global Meme",
-          }));
-
-        setSounds(result);
-      } catch (err) {
-        if (
-          err instanceof Error &&
-          err.name === "AbortError"
-        ) {
-          return;
-        }
-
-        setError("Meme sesleri yüklenemedi.");
-      } finally {
-        if (!controller.signal.aborted) {
-          setLoading(false);
-        }
-      }
+  function stop() {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.src = "";
+      audioRef.current = null;
     }
 
-    void load();
+    setPlaying(null);
+  }
 
-    return () => controller.abort();
-  }, [selected, searchText, audio]);
-
-  function listen(sound: MemeSound) {
-    if (!audio) return;
-
-    if (playingId === sound.id) {
-      audio.pause();
-      setPlayingId(null);
+  function listen(item: MemeItem) {
+    if (playing === item.id) {
+      stop();
       return;
     }
 
-    audio.pause();
-    audio.src = sound.url;
-    audio.currentTime = 0;
-    audio.volume = 0.8;
+    stop();
+    setError("");
 
-    audio.onended = () => setPlayingId(null);
+    const audio = new Audio(item.url);
+    audioRef.current = audio;
+    audio.volume = 0.75;
+    audio.preload = "metadata";
 
-    setPlayingId(sound.id);
+    audio.onloadedmetadata = () => {
+      if (Number.isFinite(audio.duration)) {
+        setDurations((prev) => ({
+          ...prev,
+          [item.id]: audio.duration,
+        }));
+      }
+    };
+
+    audio.onended = () => {
+      setPlaying(null);
+      audioRef.current = null;
+    };
+
+    audio.onerror = () => {
+      setError(
+        item.name +
+          " sesi yüklenemedi. Kaynak bağlantısı değişmiş olabilir."
+      );
+      setPlaying(null);
+    };
+
+    setPlaying(item.id);
 
     void audio.play().catch(() => {
-      setPlayingId(null);
-      setError("Bu ses şu anda oynatılamıyor.");
+      setError(
+        item.name + " sesi oynatılamadı."
+      );
+      setPlaying(null);
+    });
+  }
+
+  async function add(item: MemeItem) {
+    setError("");
+
+    let duration = durations[item.id];
+
+    if (!duration) {
+      try {
+        duration = await new Promise<number>(
+          (resolve, reject) => {
+            const audio = new Audio();
+            audio.preload = "metadata";
+
+            audio.onloadedmetadata = () => {
+              if (
+                Number.isFinite(audio.duration) &&
+                audio.duration > 0
+              ) {
+                resolve(audio.duration);
+              } else {
+                reject(
+                  new Error("Süre okunamadı")
+                );
+              }
+            };
+
+            audio.onerror = () =>
+              reject(
+                new Error("Ses yüklenemedi")
+              );
+
+            audio.src = item.url;
+          }
+        );
+
+        setDurations((prev) => ({
+          ...prev,
+          [item.id]: duration,
+        }));
+      } catch {
+        setError(
+          "Bu sesin bağlantısı veya süresi okunamadı."
+        );
+        return;
+      }
+    }
+
+    onAdd({
+      id: "meme-" + item.id,
+      name: item.name,
+      url: item.url,
+      duration,
+      source:
+        SOURCE_SEARCH +
+        encodeURIComponent(item.name),
+      category: "Global Meme",
     });
   }
 
   return (
-    <div className="mt-6 rounded-2xl border border-white/10 bg-violet-950/20 p-4">
-      <div className="mb-2 flex items-center gap-2">
-        <span className="text-xl">🌍</span>
-        <h2 className="font-bold text-white">
-          Global Meme Sounds
-        </h2>
-      </div>
+    <div className="mt-6 rounded-2xl border border-violet/30 bg-violet/10 p-4">
+      <div className="mb-3 flex items-center gap-2">
+        <span className="text-2xl">🌍</span>
 
-      <p className="mb-4 text-xs leading-5 text-white/60">
-        Komik, viral meme tarzı efektleri
-        indirmeden dinle ve videona ekle.
-      </p>
+        <div>
+          <h2 className="font-bold">
+            Global Meme Sounds
+          </h2>
 
-      <div className="mb-4 flex flex-wrap gap-2">
-        {memes.map((meme) => (
-          <button
-            key={meme.name}
-            type="button"
-            onClick={() => {
-              setSelected(meme);
-              setSearchText("");
-            }}
-            className={`rounded-full border px-3 py-1.5 text-xs transition ${
-              selected.name === meme.name
-                ? "border-violet-500 bg-violet-600/30 text-white"
-                : "border-white/10 bg-black/20 text-white/60 hover:border-violet-500"
-            }`}
-          >
-            {meme.emoji} {meme.name}
-          </button>
-        ))}
+          <p className="text-xs text-white/50">
+            Gerçek viral meme sesleri
+          </p>
+        </div>
       </div>
 
       <div className="mb-4 flex items-center gap-2 rounded-xl border border-white/10 bg-black/20 px-3">
-        <Search size={17} className="text-white/40" />
+        <Search
+          size={17}
+          className="text-white/40"
+        />
 
         <input
-          value={searchText}
+          value={query}
           onChange={(event) =>
-            setSearchText(event.target.value)
+            setQuery(event.target.value)
           }
-          placeholder="Meme sesi ara..."
+          placeholder="Vine Boom, Bruh, FBI..."
           className="w-full bg-transparent py-3 text-sm text-white outline-none"
         />
       </div>
 
-      {loading && (
-        <div className="flex items-center gap-2 py-4 text-sm text-white/60">
-          <Loader2 size={17} className="animate-spin" />
-          Sesler yükleniyor...
-        </div>
-      )}
+      <div className="mb-4 flex items-center gap-2 text-xs text-white/50">
+        <Volume2 size={15} />
+        {filtered.length} meme sesi
+      </div>
 
       {error && (
-        <p role="alert" className="mb-3 text-xs text-red-400">
+        <p
+          role="alert"
+          className="mb-3 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-300"
+        >
           {error}
         </p>
       )}
 
-      {!loading && sounds.length === 0 && !error && (
-        <p className="py-4 text-xs text-white/50">
-          Bu aramada uygun ses bulunamadı.
+      {filtered.length === 0 && (
+        <p className="py-5 text-center text-sm text-white/50">
+          Bu isimde meme sesi bulunamadı.
         </p>
       )}
 
-      <div className="max-h-[420px] space-y-2 overflow-y-auto">
-        {sounds.map((sound) => (
+      <div className="max-h-[600px] space-y-3 overflow-y-auto pr-1">
+        {filtered.map((item) => (
           <div
-            key={sound.id}
+            key={item.id}
             className="rounded-xl border border-white/10 bg-black/20 p-3"
           >
-            <div className="mb-3 flex items-start justify-between gap-2">
-              <div className="min-w-0">
-                <p
-                  className="truncate text-sm font-semibold text-white"
-                  title={sound.name}
-                >
-                  {sound.name}
+            <div className="mb-3 flex items-start gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/10 text-xl">
+                {item.emoji}
+              </div>
+
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold text-white">
+                  {item.name}
                 </p>
 
-                <p className="text-xs text-white/40">
-                  {sound.duration.toFixed(1)} sn
-                  {" • "}
-                  CC0
+                <p className="mt-1 text-xs text-white/40">
+                  {durations[item.id]
+                    ? durations[item.id].toFixed(
+                        1
+                      ) + " sn"
+                    : "Meme Sound"}
                 </p>
               </div>
 
               <a
-                href={sound.source}
+                href={
+                  SOURCE_SEARCH +
+                  encodeURIComponent(item.name)
+                }
                 target="_blank"
                 rel="noopener noreferrer"
-                title="Ses kaynağı"
+                title="Ses kaynağını görüntüle"
                 className="text-white/50 hover:text-white"
               >
                 <ExternalLink size={16} />
@@ -282,24 +357,24 @@ export default function MemeSounds({
             <div className="flex gap-2">
               <button
                 type="button"
-                onClick={() => listen(sound)}
-                className="flex flex-1 items-center justify-center gap-1 rounded-lg border border-white/20 bg-white/10 px-3 py-2 text-xs text-white"
+                onClick={() => listen(item)}
+                className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-white/20 bg-white/10 px-3 py-2.5 text-xs font-medium text-white hover:bg-white/20"
               >
-                {playingId === sound.id ? (
+                {playing === item.id ? (
                   <Pause size={15} />
                 ) : (
                   <Play size={15} />
                 )}
 
-                {playingId === sound.id
+                {playing === item.id
                   ? "Durdur"
                   : "Dinle"}
               </button>
 
               <button
                 type="button"
-                onClick={() => onAdd(sound)}
-                className="flex flex-1 items-center justify-center gap-1 rounded-lg bg-violet-600 px-3 py-2 text-xs font-semibold text-white"
+                onClick={() => void add(item)}
+                className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-violet-600 px-3 py-2.5 text-xs font-semibold text-white hover:bg-violet-500"
               >
                 <Plus size={15} />
                 Videoya Ekle
@@ -310,9 +385,11 @@ export default function MemeSounds({
       </div>
 
       <p className="mt-4 text-xs leading-5 text-white/40">
-        Efektler çevrimiçi ses servisinden gelir.
-        Kategori isimleri arama temalarıdır;
-        orijinal viral meme kayıtları garanti edilmez.
+        Sesler üçüncü taraf Myinstants
+        bağlantılarından oynatılır.
+        Kullanım ve telif hakları her kayıt
+        için ayrıca değerlendirilmelidir.
+        Bağlantılar zamanla değişebilir.
       </p>
     </div>
   );
