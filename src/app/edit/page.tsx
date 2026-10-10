@@ -23,6 +23,8 @@ import {
   Volume2,
 } from "lucide-react";
 
+import MemeSounds from "./MemeSounds";
+
 type Sound = {
   id: string;
   name: string;
@@ -61,7 +63,11 @@ const categories = [
 ];
 
 function fmt(t: number) {
-  const value = Math.max(0, Number.isFinite(t) ? t : 0);
+  const value = Math.max(
+    0,
+    Number.isFinite(t) ? t : 0
+  );
+
   return `${String(Math.floor(value / 60)).padStart(
     2,
     "0"
@@ -76,9 +82,11 @@ export default function EditStudio() {
   const video = useRef<HTMLVideoElement>(null);
   const videoObject = useRef<string | null>(null);
   const localUrls = useRef<string[]>([]);
+
   const active = useRef<Map<string, HTMLAudioElement>>(
     new Map()
   );
+
   const clipsRef = useRef<Clip[]>([]);
   const preview = useRef<HTMLAudioElement | null>(null);
   const requestId = useRef(0);
@@ -90,15 +98,19 @@ export default function EditStudio() {
   const [playing, setPlaying] = useState(false);
   const [sounds, setSounds] = useState<Sound[]>([]);
   const [clips, setClips] = useState<Clip[]>([]);
+
   const [selected, setSelected] = useState<string | null>(
     null
   );
+
   const [category, setCategory] = useState(
     categories[0].label
   );
+
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
   const [previewId, setPreviewId] = useState<
     string | null
   >(null);
@@ -108,10 +120,11 @@ export default function EditStudio() {
   }, [clips]);
 
   const stopClips = useCallback(() => {
-    active.current.forEach((a) => {
-      a.pause();
-      a.src = "";
+    active.current.forEach((audio) => {
+      audio.pause();
+      audio.src = "";
     });
+
     active.current.clear();
   }, []);
 
@@ -123,7 +136,7 @@ export default function EditStudio() {
 
   useEffect(() => {
     return () => {
-      active.current.forEach((a) => a.pause());
+      active.current.forEach((audio) => audio.pause());
       preview.current?.pause();
 
       if (videoObject.current) {
@@ -139,6 +152,7 @@ export default function EditStudio() {
   const search = useCallback(
     async (text: string, cat: string) => {
       const id = ++requestId.current;
+
       setLoading(true);
       setError("");
 
@@ -166,11 +180,11 @@ export default function EditStudio() {
         const list: ApiSound[] = Array.isArray(json)
           ? json
           : json &&
-            typeof json === "object" &&
-            "candidates" in json &&
-            Array.isArray(json.candidates)
-          ? (json.candidates as ApiSound[])
-          : [];
+              typeof json === "object" &&
+              "candidates" in json &&
+              Array.isArray(json.candidates)
+            ? (json.candidates as ApiSound[])
+            : [];
 
         const found: Sound[] = list
           .filter(
@@ -183,7 +197,8 @@ export default function EditStudio() {
           )
           .map((item) => ({
             id: `remote-${item.slug}`,
-            name: item.title || item.slug || "Ses efekti",
+            name:
+              item.title || item.slug || "Ses efekti",
             url: item.mp3_url!,
             duration: Math.max(
               0.1,
@@ -198,12 +213,12 @@ export default function EditStudio() {
         if (id === requestId.current) {
           setSounds(found);
         }
-      } catch (e) {
+      } catch (err) {
         if (id === requestId.current) {
           setSounds([]);
           setError(
-            e instanceof Error
-              ? e.message
+            err instanceof Error
+              ? err.message
               : "Sesler yüklenemedi."
           );
         }
@@ -220,9 +235,11 @@ export default function EditStudio() {
     void search("", categories[0].label);
   }, [search]);
 
-  function uploadVideo(e: ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    e.target.value = "";
+  function uploadVideo(
+    event: ChangeEvent<HTMLInputElement>
+  ) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
 
     if (!file) return;
 
@@ -255,10 +272,10 @@ export default function EditStudio() {
   }
 
   async function uploadSound(
-    e: ChangeEvent<HTMLInputElement>
+    event: ChangeEvent<HTMLInputElement>
   ) {
-    const files = Array.from(e.target.files || []);
-    e.target.value = "";
+    const files = Array.from(event.target.files || []);
+    event.target.value = "";
 
     const added: Sound[] = [];
 
@@ -274,16 +291,18 @@ export default function EditStudio() {
       localUrls.current.push(url);
 
       const len = await new Promise<number>((resolve) => {
-        const a = new Audio();
-        a.preload = "metadata";
+        const audio = new Audio();
+        audio.preload = "metadata";
 
-        a.onloadedmetadata = () =>
+        audio.onloadedmetadata = () =>
           resolve(
-            Number.isFinite(a.duration) ? a.duration : 0
+            Number.isFinite(audio.duration)
+              ? audio.duration
+              : 0
           );
 
-        a.onerror = () => resolve(0);
-        a.src = url;
+        audio.onerror = () => resolve(0);
+        audio.src = url;
       });
 
       if (len > 0) {
@@ -309,13 +328,13 @@ export default function EditStudio() {
 
     stopPreview();
 
-    const a = new Audio(sound.url);
-    preview.current = a;
+    const audio = new Audio(sound.url);
+    preview.current = audio;
     setPreviewId(sound.id);
 
-    a.onended = stopPreview;
+    audio.onended = stopPreview;
 
-    void a.play().catch(() => {
+    void audio.play().catch(() => {
       setError(
         "Ses oynatılamadı. Kaynak bağlantısını kontrol et."
       );
@@ -357,19 +376,21 @@ export default function EditStudio() {
         t >= clip.start &&
         t < clip.start + clip.duration;
 
-      const a = active.current.get(clip.id);
+      const audio = active.current.get(clip.id);
 
       if (!inRange) {
-        if (a) {
-          a.pause();
+        if (audio) {
+          audio.pause();
           active.current.delete(clip.id);
         }
+
         continue;
       }
 
-      if (!a) {
+      if (!audio) {
         const sound = new Audio(clip.sound.url);
         sound.volume = clip.volume / 100;
+
         sound.currentTime = Math.max(
           0,
           t - clip.start
@@ -382,14 +403,14 @@ export default function EditStudio() {
           setError("Ses kaynağı çalınamadı.");
         });
       } else {
-        a.volume = clip.volume / 100;
+        audio.volume = clip.volume / 100;
 
         const expected = t - clip.start;
 
         if (
-          Math.abs(a.currentTime - expected) > 0.45
+          Math.abs(audio.currentTime - expected) > 0.45
         ) {
-          a.currentTime = expected;
+          audio.currentTime = expected;
         }
       }
     }
@@ -400,6 +421,7 @@ export default function EditStudio() {
 
     const next = clamp(t, 0, duration);
     video.current.currentTime = next;
+
     setTime(next);
     stopClips();
 
@@ -409,22 +431,22 @@ export default function EditStudio() {
   }
 
   async function toggle() {
-    const v = video.current;
-    if (!v) return;
+    const currentVideo = video.current;
+    if (!currentVideo) return;
 
-    if (!v.paused) {
-      v.pause();
+    if (!currentVideo.paused) {
+      currentVideo.pause();
       stopClips();
       return;
     }
 
     try {
-      if (v.currentTime >= duration - 0.05) {
+      if (currentVideo.currentTime >= duration - 0.05) {
         seek(0);
       }
 
-      await v.play();
-      sync(v.currentTime);
+      await currentVideo.play();
+      sync(currentVideo.currentTime);
     } catch {
       setError("Video oynatılamadı.");
     }
@@ -432,8 +454,10 @@ export default function EditStudio() {
 
   function update(id: string, patch: Partial<Clip>) {
     setClips((prev) =>
-      prev.map((c) =>
-        c.id === id ? { ...c, ...patch } : c
+      prev.map((clip) =>
+        clip.id === id
+          ? { ...clip, ...patch }
+          : clip
       )
     );
 
@@ -445,10 +469,10 @@ export default function EditStudio() {
     }
 
     if (patch.volume !== undefined) {
-      const a = active.current.get(id);
+      const audio = active.current.get(id);
 
-      if (a) {
-        a.volume = patch.volume / 100;
+      if (audio) {
+        audio.volume = patch.volume / 100;
       }
     }
   }
@@ -458,7 +482,7 @@ export default function EditStudio() {
     active.current.delete(id);
 
     setClips((prev) =>
-      prev.filter((c) => c.id !== id)
+      prev.filter((clip) => clip.id !== id)
     );
 
     if (selected === id) {
@@ -466,7 +490,9 @@ export default function EditStudio() {
     }
   }
 
-  const chosen = clips.find((c) => c.id === selected);
+  const chosen = clips.find(
+    (clip) => clip.id === selected
+  );
 
   return (
     <main className="mx-auto max-w-7xl px-4 py-10">
@@ -479,8 +505,9 @@ export default function EditStudio() {
           <h1 className="text-3xl font-bold">
             HAGY Edit Studio
           </h1>
+
           <p className="text-sm text-white/50">
-            Online Sound Library • Video Editor 3.0
+            Global Meme Sounds • Video Editor 4.0
           </p>
         </div>
       </div>
@@ -488,7 +515,10 @@ export default function EditStudio() {
       <div className="grid gap-5 lg:grid-cols-[340px_1fr]">
         <aside className="card p-5">
           <h2 className="mb-3 flex items-center gap-2 font-bold">
-            <Music2 size={20} className="text-violet" />
+            <Music2
+              size={20}
+              className="text-violet"
+            />
             Hazır Ses Efektleri
           </h2>
 
@@ -498,15 +528,17 @@ export default function EditStudio() {
 
           <form
             className="mb-3 flex gap-2"
-            onSubmit={(e) => {
-              e.preventDefault();
+            onSubmit={(event) => {
+              event.preventDefault();
               void search(query, category);
             }}
           >
             <input
               aria-label="Ses ara"
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              onChange={(event) =>
+                setQuery(event.target.value)
+              }
               placeholder="Boing, laugh, meme, punch..."
               className="min-w-0 flex-1 rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm outline-none focus:border-violet"
             />
@@ -521,22 +553,22 @@ export default function EditStudio() {
           </form>
 
           <div className="mb-4 flex flex-wrap gap-2">
-            {categories.map((c) => (
+            {categories.map((item) => (
               <button
                 type="button"
-                key={c.label}
+                key={item.label}
                 onClick={() => {
-                  setCategory(c.label);
+                  setCategory(item.label);
                   setQuery("");
-                  void search("", c.label);
+                  void search("", item.label);
                 }}
                 className={`rounded-full border px-3 py-1.5 text-xs ${
-                  category === c.label
+                  category === item.label
                     ? "border-violet bg-violet/20"
                     : "border-white/10 bg-white/5"
                 }`}
               >
-                {c.label}
+                {item.label}
               </button>
             ))}
           </div>
@@ -615,6 +647,7 @@ export default function EditStudio() {
                     ) : (
                       <Play size={14} />
                     )}
+
                     {previewId === sound.id
                       ? "Durdur"
                       : "Dinle"}
@@ -637,6 +670,9 @@ export default function EditStudio() {
             Çevrimiçi sesler üçüncü taraf servisten
             alınır. Bağlantı ve servis erişimi gerekir.
           </p>
+
+          {/* GLOBAL MEME SOUNDS */}
+          <MemeSounds onAdd={add} />
         </aside>
 
         <section className="space-y-5">
@@ -693,13 +729,19 @@ export default function EditStudio() {
                     playsInline
                     preload="metadata"
                     className="max-h-[480px] w-full rounded-xl object-contain"
-                    onLoadedMetadata={(e) => {
-                      const d = e.currentTarget.duration;
+                    onLoadedMetadata={(event) => {
+                      const d =
+                        event.currentTarget.duration;
 
-                      if (Number.isFinite(d) && d > 0) {
+                      if (
+                        Number.isFinite(d) &&
+                        d > 0
+                      ) {
                         setDuration(d);
                       } else {
-                        setError("Video süresi okunamadı.");
+                        setError(
+                          "Video süresi okunamadı."
+                        );
                       }
                     }}
                     onTimeUpdate={() => {
@@ -748,8 +790,10 @@ export default function EditStudio() {
                     max={duration || 1}
                     step={0.01}
                     value={time}
-                    onChange={(e) =>
-                      seek(Number(e.target.value))
+                    onChange={(event) =>
+                      seek(
+                        Number(event.target.value)
+                      )
                     }
                     className="min-w-0 flex-1 accent-violet"
                   />
@@ -791,12 +835,14 @@ export default function EditStudio() {
 
                 <div
                   className="relative mb-3 h-12 cursor-pointer overflow-hidden rounded-lg bg-violet/30"
-                  onClick={(e) => {
-                    const r =
-                      e.currentTarget.getBoundingClientRect();
+                  onClick={(event) => {
+                    const rect =
+                      event.currentTarget.getBoundingClientRect();
 
                     seek(
-                      ((e.clientX - r.left) / r.width) *
+                      ((event.clientX -
+                        rect.left) /
+                        rect.width) *
                         duration
                     );
                   }}
@@ -826,7 +872,7 @@ export default function EditStudio() {
                     ),
                   }}
                 >
-                  {clips.map((clip, i) => (
+                  {clips.map((clip, index) => (
                     <button
                       key={clip.id}
                       type="button"
@@ -839,21 +885,26 @@ export default function EditStudio() {
                           : "border-emerald-400/40 bg-emerald-600/70"
                       }`}
                       style={{
-                        top: `${8 + i * 40}px`,
+                        top: `${8 + index * 40}px`,
                         left: `${
                           duration
-                            ? (clip.start / duration) * 100
+                            ? (clip.start /
+                                duration) *
+                              100
                             : 0
                         }%`,
                         width: `${
                           duration
-                            ? (clip.duration / duration) *
+                            ? (clip.duration /
+                                duration) *
                               100
                             : 0
                         }%`,
                         minWidth: 20,
                       }}
-                      title={`${clip.start.toFixed(1)} sn`}
+                      title={`${clip.start.toFixed(
+                        1
+                      )} sn`}
                     >
                       <span className="truncate">
                         🔊 {clip.sound.name}
@@ -902,13 +953,16 @@ export default function EditStudio() {
                         min={0}
                         max={Math.max(
                           0,
-                          duration - chosen.duration
+                          duration -
+                            chosen.duration
                         )}
                         step={0.1}
                         value={chosen.start}
-                        onChange={(e) =>
+                        onChange={(event) =>
                           update(chosen.id, {
-                            start: Number(e.target.value),
+                            start: Number(
+                              event.target.value
+                            ),
                           })
                         }
                       />
@@ -924,9 +978,11 @@ export default function EditStudio() {
                         max={100}
                         step={1}
                         value={chosen.volume}
-                        onChange={(e) =>
+                        onChange={(event) =>
                           update(chosen.id, {
-                            volume: Number(e.target.value),
+                            volume: Number(
+                              event.target.value
+                            ),
                           })
                         }
                       />
@@ -961,13 +1017,15 @@ export default function EditStudio() {
 
           <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-xs leading-6 text-white/50">
             <p className="mb-1 font-semibold text-white">
-              HAGY Edit Studio 3.0
+              HAGY Edit Studio 4.0
             </p>
 
-            Sesleri çevrimiçi ara, dinle, videoya ekle
-            ve başlangıç saniyesini ayarla. MP4 dışa
-            aktarma henüz yoktur. Proje sayfa
-            yenilenince sıfırlanır. Çevrimiçi sesler
+            Hazır sesleri ve Global Meme
+            efektlerini ara, dinle, videoya
+            ekle ve başlangıç saniyesini
+            ayarla. MP4 dışa aktarma henüz
+            yoktur. Proje sayfa yenilenince
+            sıfırlanır. Çevrimiçi sesler
             üçüncü taraf servise bağlıdır.
           </div>
         </section>
