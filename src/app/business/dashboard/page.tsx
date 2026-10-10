@@ -1,7 +1,12 @@
 
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useState,
+  type FormEvent,
+} from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient, type User } from "@supabase/supabase-js";
@@ -17,7 +22,6 @@ import {
   LogOut,
   Menu,
   X,
-  Sparkles,
   Building2,
   ShieldCheck,
   Loader2,
@@ -27,8 +31,8 @@ import {
   Trash2,
   Search,
   Send,
-  CheckCircle2,
   ArrowRight,
+  Sparkles,
 } from "lucide-react";
 
 const supabase = createClient(
@@ -36,22 +40,8 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-type AccessStatus =
-  | "checking"
-  | "approved"
-  | "pending"
-  | "rejected"
-  | "error";
-
-type MenuId =
-  | "overview"
-  | "customers"
-  | "tasks"
-  | "finance"
-  | "assistant"
-  | "analytics"
-  | "portfolio"
-  | "settings";
+type Access = "checking" | "approved" | "pending" | "rejected" | "error";
+type Tab = "overview" | "customers" | "assistant";
 
 type Customer = {
   id: string;
@@ -77,7 +67,7 @@ type ChatMessage = {
   content: string;
 };
 
-const emptyForm: CustomerForm = {
+const emptyCustomer: CustomerForm = {
   name: "",
   phone: "",
   email: "",
@@ -85,80 +75,128 @@ const emptyForm: CustomerForm = {
   notes: "",
 };
 
-const menuItems = [
-  { id: "overview", label: "Genel Bakış", icon: LayoutDashboard },
-  { id: "customers", label: "Müşteriler", icon: Users },
-  { id: "tasks", label: "Görevler", icon: ListTodo },
-  { id: "finance", label: "Gelir & Gider", icon: Wallet },
-  { id: "assistant", label: "Hagy AI Asistan", icon: Bot },
-  { id: "analytics", label: "Raporlar", icon: BarChart3 },
-  { id: "portfolio", label: "Dijital Portföy", icon: BriefcaseBusiness },
-  { id: "settings", label: "Ayarlar", icon: Settings },
+const inputClass =
+  "w-full rounded-xl border border-white/10 bg-[#100C1C] px-4 py-3 text-sm text-white outline-none focus:border-purple-500";
+
+const cardClass =
+  "rounded-2xl border border-white/10 bg-white/[0.035] p-5";
+
+const menu = [
+  {
+    id: "overview",
+    label: "Genel Bakış",
+    icon: LayoutDashboard,
+    href: "",
+  },
+  {
+    id: "customers",
+    label: "Müşteriler",
+    icon: Users,
+    href: "",
+  },
+  {
+    id: "tasks",
+    label: "Görevler",
+    icon: ListTodo,
+    href: "/business/tasks",
+  },
+  {
+    id: "finance",
+    label: "Gelir & Gider",
+    icon: Wallet,
+    href: "/business/finance",
+  },
+  {
+    id: "assistant",
+    label: "Hagy AI Asistan",
+    icon: Bot,
+    href: "",
+  },
+  {
+    id: "reports",
+    label: "Raporlar",
+    icon: BarChart3,
+    href: "/business/reports",
+  },
+  {
+    id: "portfolio",
+    label: "Dijital Portföy",
+    icon: BriefcaseBusiness,
+    href: "/business/portfolio",
+  },
+  {
+    id: "settings",
+    label: "Ayarlar",
+    icon: Settings,
+    href: "/business/settings",
+  },
 ] as const;
 
-const inputClass =
-  "w-full rounded-xl border border-white/10 bg-[#0D0A17] px-4 py-3 text-sm text-white outline-none focus:border-purple-500";
-
-function formatMoney(amount: number) {
+function money(value: number) {
   return new Intl.NumberFormat("tr-TR", {
     style: "currency",
     currency: "TRY",
-  }).format(amount);
+  }).format(value);
 }
 
-function getCurrentMonthRange() {
+function currentMonth() {
   const now = new Date();
-  const year = now.getFullYear();
-  const month = now.getMonth();
 
-  const startDate = [
-    year,
-    String(month + 1).padStart(2, "0"),
-    "01",
-  ].join("-");
+  const start = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    1
+  );
 
-  const next = new Date(year, month + 1, 1);
+  const next = new Date(
+    now.getFullYear(),
+    now.getMonth() + 1,
+    1
+  );
 
-  const endDate = [
-    next.getFullYear(),
-    String(next.getMonth() + 1).padStart(2, "0"),
-    "01",
-  ].join("-");
+  function key(date: Date) {
+    return (
+      date.getFullYear() +
+      "-" +
+      String(date.getMonth() + 1).padStart(2, "0") +
+      "-01"
+    );
+  }
 
-  return { startDate, endDate };
+  return {
+    start: key(start),
+    end: key(next),
+  };
 }
 
 export default function BusinessDashboardPage() {
   const router = useRouter();
 
   const [user, setUser] = useState<User | null>(null);
-  const [accessStatus, setAccessStatus] =
-    useState<AccessStatus>("checking");
+  const [access, setAccess] = useState<Access>("checking");
   const [isAdmin, setIsAdmin] = useState(false);
-  const [activeTab, setActiveTab] = useState<MenuId>("overview");
+  const [tab, setTab] = useState<Tab>("overview");
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [loggingOut, setLoggingOut] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [loggingOut, setLoggingOut] = useState(false);
 
   const [customers, setCustomers] = useState<Customer[]>([]);
-  const [customersLoading, setCustomersLoading] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [customerError, setCustomerError] = useState("");
   const [search, setSearch] = useState("");
-  const [showCustomerForm, setShowCustomerForm] = useState(false);
+
+  const [formOpen, setFormOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [customerForm, setCustomerForm] =
-    useState<CustomerForm>(emptyForm);
-  const [savingCustomer, setSavingCustomer] = useState(false);
+  const [customerForm, setCustomerForm] = useState<CustomerForm>({
+    ...emptyCustomer,
+  });
+  const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const [taskCount, setTaskCount] = useState<number | null>(null);
-  const [pendingTaskCount, setPendingTaskCount] =
-    useState<number | null>(null);
-
-  const [monthlyIncome, setMonthlyIncome] =
-    useState<number | null>(null);
-  const [monthlyExpense, setMonthlyExpense] =
-    useState<number | null>(null);
+  const [pendingTasks, setPendingTasks] = useState<number | null>(null);
+  const [income, setIncome] = useState<number | null>(null);
+  const [expense, setExpense] = useState<number | null>(null);
 
   const [aiMessage, setAiMessage] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
@@ -166,14 +204,14 @@ export default function BusinessDashboardPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
 
   useEffect(() => {
-    let mounted = true;
+    let active = true;
 
     async function checkAccess() {
-      setAccessStatus("checking");
+      setAccess("checking");
 
       const { data, error } = await supabase.auth.getUser();
 
-      if (!mounted) return;
+      if (!active) return;
 
       if (error || !data.user) {
         router.replace("/business/login");
@@ -182,46 +220,46 @@ export default function BusinessDashboardPage() {
 
       const currentUser = data.user;
 
-      const { data: adminResult, error: adminError } =
+      const { data: admin, error: adminError } =
         await supabase.rpc("is_business_admin");
 
-      if (!mounted) return;
+      if (!active) return;
 
       if (adminError) {
-        setAccessStatus("error");
+        setAccess("error");
         return;
       }
 
-      if (adminResult === true) {
+      if (admin === true) {
         setUser(currentUser);
         setIsAdmin(true);
-        setAccessStatus("approved");
+        setAccess("approved");
         return;
       }
 
-      const { data: application, error: applicationError } =
+      const { data: application, error: appError } =
         await supabase
           .from("business_applications")
           .select("status")
           .eq("user_id", currentUser.id)
           .maybeSingle();
 
-      if (!mounted) return;
+      if (!active) return;
 
-      if (applicationError) {
-        setAccessStatus("error");
+      if (appError) {
+        setAccess("error");
         return;
       }
 
+      setUser(currentUser);
       setIsAdmin(false);
 
       if (application?.status === "approved") {
-        setUser(currentUser);
-        setAccessStatus("approved");
+        setAccess("approved");
       } else if (application?.status === "rejected") {
-        setAccessStatus("rejected");
+        setAccess("rejected");
       } else {
-        setAccessStatus("pending");
+        setAccess("pending");
       }
     }
 
@@ -231,115 +269,84 @@ export default function BusinessDashboardPage() {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event) => {
       if (event === "SIGNED_OUT") {
-        setUser(null);
         router.replace("/business/login");
       }
     });
 
     return () => {
-      mounted = false;
+      active = false;
       subscription.unsubscribe();
     };
   }, [router, refreshKey]);
 
-  useEffect(() => {
-    if (accessStatus !== "approved" || !user) return;
+  const loadData = useCallback(async () => {
+    if (!user || access !== "approved") return;
 
-    let cancelled = false;
+    setLoading(true);
+    setCustomerError("");
 
-    async function loadData() {
-      setCustomersLoading(true);
-      setCustomerError("");
+    const range = currentMonth();
 
-      const { startDate, endDate } = getCurrentMonthRange();
+    const [c, t, p, f] = await Promise.all([
+      supabase
+        .from("business_customers")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false }),
 
-      const [
-        customerResult,
-        taskResult,
-        pendingResult,
-        financeResult,
-      ] = await Promise.all([
-        supabase
-          .from("business_customers")
-          .select("*")
-          .eq("user_id", user!.id)
-          .order("created_at", { ascending: false }),
+      supabase
+        .from("business_tasks")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", user.id),
 
-        supabase
-          .from("business_tasks")
-          .select("*", { count: "exact", head: true })
-          .eq("user_id", user!.id),
+      supabase
+        .from("business_tasks")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", user.id)
+        .eq("status", "pending"),
 
-        supabase
-          .from("business_tasks")
-          .select("*", { count: "exact", head: true })
-          .eq("user_id", user!.id)
-          .eq("status", "pending"),
+      supabase
+        .from("business_finances")
+        .select("type,amount")
+        .eq("user_id", user.id)
+        .gte("transaction_date", range.start)
+        .lt("transaction_date", range.end),
+    ]);
 
-        supabase
-          .from("business_finances")
-          .select("type, amount")
-          .eq("user_id", user!.id)
-          .gte("transaction_date", startDate)
-          .lt("transaction_date", endDate),
-      ]);
-
-      if (cancelled) return;
-
-      if (customerResult.error) {
-        setCustomerError(
-          "Müşteriler yüklenemedi: " +
-            customerResult.error.message
-        );
-      } else {
-        setCustomers(
-          (customerResult.data ?? []) as Customer[]
-        );
-      }
-
-      setTaskCount(
-        taskResult.error ? null : taskResult.count ?? 0
-      );
-
-      setPendingTaskCount(
-        pendingResult.error ? null : pendingResult.count ?? 0
-      );
-
-      if (financeResult.error) {
-        setMonthlyIncome(null);
-        setMonthlyExpense(null);
-      } else {
-        const financeRecords = financeResult.data ?? [];
-
-        const incomeCents = financeRecords
-          .filter((record) => record.type === "income")
-          .reduce(
-            (sum, record) =>
-              sum + Math.round(Number(record.amount) * 100),
-            0
-          );
-
-        const expenseCents = financeRecords
-          .filter((record) => record.type === "expense")
-          .reduce(
-            (sum, record) =>
-              sum + Math.round(Number(record.amount) * 100),
-            0
-          );
-
-        setMonthlyIncome(incomeCents / 100);
-        setMonthlyExpense(expenseCents / 100);
-      }
-
-      setCustomersLoading(false);
+    if (c.error) {
+      setCustomerError(c.error.message);
+    } else {
+      setCustomers((c.data ?? []) as Customer[]);
     }
 
-    void loadData();
+    setTaskCount(t.error ? null : t.count ?? 0);
+    setPendingTasks(p.error ? null : p.count ?? 0);
 
-    return () => {
-      cancelled = true;
-    };
-  }, [accessStatus, user]);
+    if (f.error) {
+      setIncome(null);
+      setExpense(null);
+    } else {
+      const records = f.data ?? [];
+
+      const sum = (type: string) =>
+        records
+          .filter((item) => item.type === type)
+          .reduce(
+            (total, item) =>
+              total + Math.round(Number(item.amount) * 100),
+            0
+          ) / 100;
+
+      setIncome(sum("income"));
+      setExpense(sum("expense"));
+    }
+
+    setLoading(false);
+  }, [user, access]);
+
+  useEffect(() => {
+    void loadData();
+  }, [loadData]);
 
   const companyName =
     typeof user?.user_metadata?.company_name === "string"
@@ -350,10 +357,6 @@ export default function BusinessDashboardPage() {
     typeof user?.user_metadata?.full_name === "string"
       ? user.user_metadata.full_name
       : "İşletme Yöneticisi";
-
-  const activeItem = menuItems.find(
-    (item) => item.id === activeTab
-  );
 
   const activeCustomers = customers.filter(
     (customer) => customer.status === "active"
@@ -371,36 +374,35 @@ export default function BusinessDashboardPage() {
     );
   });
 
-  async function handleLogout() {
+  function openTab(id: string, href: string) {
+    setSidebarOpen(false);
+
+    if (href) {
+      router.push(href);
+      return;
+    }
+
+    if (id === "overview" || id === "customers" || id === "assistant") {
+      setTab(id);
+      setSearch("");
+    }
+  }
+
+  async function logout() {
     setLoggingOut(true);
     await supabase.auth.signOut();
     router.replace("/business/login");
   }
 
-  function openTab(tab: MenuId) {
-    if (tab === "tasks") {
-      router.push("/business/tasks");
-      return;
-    }
-
-    if (tab === "finance") {
-      router.push("/business/finance");
-      return;
-    }
-
-    setActiveTab(tab);
-    setSidebarOpen(false);
-    setSearch("");
-  }
-
-  function openNewCustomer() {
-    setCustomerForm({ ...emptyForm });
+  function newCustomer() {
     setEditingId(null);
+    setCustomerForm({ ...emptyCustomer });
     setCustomerError("");
-    setShowCustomerForm(true);
+    setFormOpen(true);
   }
 
-  function openEditCustomer(customer: Customer) {
+  function editCustomer(customer: Customer) {
+    setEditingId(customer.id);
     setCustomerForm({
       name: customer.name,
       phone: customer.phone ?? "",
@@ -408,36 +410,22 @@ export default function BusinessDashboardPage() {
       status: customer.status,
       notes: customer.notes ?? "",
     });
-
-    setEditingId(customer.id);
     setCustomerError("");
-    setShowCustomerForm(true);
+    setFormOpen(true);
   }
 
-  function closeCustomerForm() {
-    if (savingCustomer) return;
-    setShowCustomerForm(false);
-    setEditingId(null);
-    setCustomerForm({ ...emptyForm });
-  }
-
-  async function saveCustomer(
-    event: FormEvent<HTMLFormElement>
-  ) {
+  async function saveCustomer(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-
-    if (!user || savingCustomer) return;
+    if (!user || saving) return;
 
     const name = customerForm.name.trim();
 
     if (!name || name.length > 150) {
-      setCustomerError(
-        "Müşteri adı 1-150 karakter olmalıdır."
-      );
+      setCustomerError("Müşteri adı 1-150 karakter olmalı.");
       return;
     }
 
-    setSavingCustomer(true);
+    setSaving(true);
     setCustomerError("");
 
     const payload = {
@@ -461,19 +449,14 @@ export default function BusinessDashboardPage() {
         if (error) throw error;
 
         setCustomers((current) =>
-          current.map((customer) =>
-            customer.id === editingId
-              ? (data as Customer)
-              : customer
+          current.map((item) =>
+            item.id === editingId ? (data as Customer) : item
           )
         );
       } else {
         const { data, error } = await supabase
           .from("business_customers")
-          .insert({
-            ...payload,
-            user_id: user.id,
-          })
+          .insert({ ...payload, user_id: user.id })
           .select("*")
           .single();
 
@@ -485,28 +468,24 @@ export default function BusinessDashboardPage() {
         ]);
       }
 
-      setShowCustomerForm(false);
+      setFormOpen(false);
       setEditingId(null);
-      setCustomerForm({ ...emptyForm });
-    } catch (error) {
+      setCustomerForm({ ...emptyCustomer });
+    } catch (err) {
       setCustomerError(
-        error instanceof Error
-          ? error.message
-          : "Müşteri kaydedilemedi."
+        err instanceof Error ? err.message : "Kayıt başarısız."
       );
     } finally {
-      setSavingCustomer(false);
+      setSaving(false);
     }
   }
 
   async function deleteCustomer(customer: Customer) {
     if (!user || deletingId) return;
 
-    const confirmed = window.confirm(
-      `${customer.name} adlı müşteriyi kalıcı olarak silmek istiyor musun?`
-    );
-
-    if (!confirmed) return;
+    if (!window.confirm(`${customer.name} silinsin mi?`)) {
+      return;
+    }
 
     setDeletingId(customer.id);
     setCustomerError("");
@@ -519,9 +498,7 @@ export default function BusinessDashboardPage() {
       .select("id");
 
     if (error || !data?.length) {
-      setCustomerError(
-        error?.message ?? "Müşteri silinemedi."
-      );
+      setCustomerError(error?.message ?? "Silme başarısız.");
     } else {
       setCustomers((current) =>
         current.filter((item) => item.id !== customer.id)
@@ -531,19 +508,12 @@ export default function BusinessDashboardPage() {
     setDeletingId(null);
   }
 
-  async function handleAiSubmit(
-    event: FormEvent<HTMLFormElement>
-  ) {
+  async function sendAi(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     const message = aiMessage.trim();
 
     if (!message || aiLoading) return;
-
-    if (message.length > 2000) {
-      setAiError("Mesaj en fazla 2000 karakter olabilir.");
-      return;
-    }
 
     setAiLoading(true);
     setAiError("");
@@ -557,11 +527,10 @@ export default function BusinessDashboardPage() {
     try {
       const {
         data: { session },
-        error: sessionError,
       } = await supabase.auth.getSession();
 
-      if (sessionError || !session?.access_token) {
-        throw new Error("Lütfen yeniden giriş yapın.");
+      if (!session?.access_token) {
+        throw new Error("Tekrar giriş yapmalısın.");
       }
 
       const response = await fetch("/api/ai/chat", {
@@ -573,82 +542,72 @@ export default function BusinessDashboardPage() {
         body: JSON.stringify({ message }),
       });
 
-      const data = await response.json().catch(() => null);
+      const result = await response.json().catch(() => null);
 
       if (!response.ok) {
-        throw new Error(
-          data?.error || "AI yanıtı alınamadı."
-        );
+        throw new Error(result?.error || "AI yanıtı alınamadı.");
       }
 
-      if (typeof data?.reply !== "string") {
-        throw new Error("AI yanıtı geçersiz.");
+      if (typeof result?.reply !== "string") {
+        throw new Error("Geçersiz AI yanıtı.");
       }
 
       setMessages((current) => [
         ...current,
-        { role: "assistant", content: data.reply },
+        { role: "assistant", content: result.reply },
       ]);
-    } catch (error) {
+    } catch (err) {
       setAiError(
-        error instanceof Error
-          ? error.message
-          : "Bağlantı hatası."
+        err instanceof Error ? err.message : "AI bağlantı hatası."
       );
     } finally {
       setAiLoading(false);
     }
   }
 
-  if (accessStatus === "checking") {
+  if (access === "checking") {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#080610] text-white">
-        <Loader2
-          size={36}
-          className="animate-spin text-purple-400"
-        />
-        <span className="ml-3">
-          İşletme erişimi kontrol ediliyor...
-        </span>
+      <div className="flex min-h-screen items-center justify-center gap-3 bg-[#080610] text-white">
+        <Loader2 className="animate-spin text-purple-400" />
+        Erişim kontrol ediliyor...
       </div>
     );
   }
 
-  if (accessStatus !== "approved") {
+  if (access !== "approved") {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-[#080610] px-5 text-white">
+      <main className="flex min-h-screen items-center justify-center bg-[#080610] p-5 text-white">
         <div className="w-full max-w-lg rounded-3xl border border-white/10 bg-white/5 p-8 text-center">
           <ShieldCheck
             size={44}
-            className="mx-auto mb-6 text-purple-400"
+            className="mx-auto mb-5 text-purple-400"
           />
 
-          <h1 className="text-3xl font-bold">
-            {accessStatus === "pending"
+          <h1 className="text-2xl font-bold">
+            {access === "pending"
               ? "Başvurunuz Onay Bekliyor"
-              : accessStatus === "rejected"
+              : access === "rejected"
                 ? "Başvurunuz Reddedildi"
                 : "Erişim Doğrulanamadı"}
           </h1>
 
-          <p className="mt-5 text-gray-400">
-            {accessStatus === "pending"
-              ? "Yönetici onayından sonra paneli kullanabilirsiniz."
-              : accessStatus === "rejected"
+          <p className="mt-4 text-gray-400">
+            {access === "pending"
+              ? "Yönetici onayından sonra panel açılacaktır."
+              : access === "rejected"
                 ? "İşletme başvurunuz onaylanmadı."
                 : "Lütfen tekrar deneyin."}
           </p>
 
           <button
-            onClick={() => setRefreshKey((n) => n + 1)}
-            className="mt-8 flex w-full items-center justify-center gap-2 rounded-xl bg-purple-600 p-3"
+            onClick={() => setRefreshKey((value) => value + 1)}
+            className="mt-6 w-full rounded-xl bg-purple-600 p-3"
           >
-            <RefreshCw size={18} />
             Durumu Kontrol Et
           </button>
 
           <button
-            onClick={handleLogout}
+            onClick={logout}
             disabled={loggingOut}
             className="mt-3 w-full rounded-xl border border-white/10 p-3"
           >
@@ -672,9 +631,7 @@ export default function BusinessDashboardPage() {
 
       <aside
         className={`fixed inset-y-0 left-0 z-50 flex w-72 flex-col border-r border-white/10 bg-[#100C1C] transition-transform lg:translate-x-0 ${
-          sidebarOpen
-            ? "translate-x-0"
-            : "-translate-x-full"
+          sidebarOpen ? "translate-x-0" : "-translate-x-full"
         }`}
       >
         <div className="flex h-20 items-center justify-between border-b border-white/10 px-6">
@@ -683,7 +640,7 @@ export default function BusinessDashboardPage() {
             className="flex items-center gap-3"
           >
             <div className="rounded-xl bg-purple-600 p-3">
-              <Building2 size={23} />
+              <Building2 size={22} />
             </div>
 
             <div>
@@ -691,7 +648,7 @@ export default function BusinessDashboardPage() {
                 Hagy Business
               </h1>
               <p className="text-xs text-gray-500">
-                AI Business Platform
+                Business Management
               </p>
             </div>
           </Link>
@@ -702,47 +659,43 @@ export default function BusinessDashboardPage() {
             className="lg:hidden"
             aria-label="Menüyü kapat"
           >
-            <X size={23} />
+            <X size={22} />
           </button>
         </div>
 
-        <div className="px-4 pt-6">
+        <div className="flex-1 overflow-y-auto px-4 py-6">
           <div className="mb-6 rounded-xl border border-purple-500/20 bg-purple-500/10 p-4">
-            <p className="mb-2 text-xs text-purple-300">
+            <p className="text-xs text-purple-300">
               İşletme Hesabı
             </p>
-            <p className="truncate font-semibold">
+            <p className="mt-2 truncate font-semibold">
               {companyName}
-            </p>
-            <p className="mt-1 text-xs text-gray-500">
-              Yönetim paneli
             </p>
           </div>
 
-          <p className="mb-3 px-3 text-xs uppercase tracking-widest text-gray-600">
+          <p className="mb-3 px-3 text-xs uppercase tracking-widest text-gray-500">
             Yönetim
           </p>
 
           <nav className="space-y-1">
-            {menuItems.map((item) => {
+            {menu.map((item) => {
               const Icon = item.icon;
+              const selected = !item.href && tab === item.id;
 
               return (
                 <button
-                  type="button"
                   key={item.id}
-                  onClick={() => openTab(item.id)}
+                  type="button"
+                  onClick={() => openTab(item.id, item.href)}
                   className={`flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left text-sm ${
-                    activeTab === item.id
+                    selected
                       ? "bg-purple-600 text-white"
                       : "text-gray-400 hover:bg-white/5 hover:text-white"
                   }`}
                 >
                   <Icon size={19} />
                   {item.label}
-
-                  {(item.id === "tasks" ||
-                    item.id === "finance") && (
+                  {item.href && (
                     <ArrowRight
                       size={15}
                       className="ml-auto"
@@ -764,8 +717,8 @@ export default function BusinessDashboardPage() {
           </nav>
         </div>
 
-        <div className="mt-auto border-t border-white/10 p-4">
-          <div className="mb-4 rounded-xl bg-white/5 p-3">
+        <div className="border-t border-white/10 p-4">
+          <div className="mb-3 rounded-xl bg-white/5 p-3">
             <p className="truncate font-semibold">
               {fullName}
             </p>
@@ -776,7 +729,7 @@ export default function BusinessDashboardPage() {
 
           <button
             type="button"
-            onClick={handleLogout}
+            onClick={logout}
             disabled={loggingOut}
             className="flex w-full items-center gap-3 rounded-xl px-4 py-3 text-sm text-red-300 hover:bg-red-500/10"
           >
@@ -800,7 +753,11 @@ export default function BusinessDashboardPage() {
 
             <div>
               <h2 className="text-lg font-bold">
-                {activeItem?.label}
+                {tab === "overview"
+                  ? "Genel Bakış"
+                  : tab === "customers"
+                    ? "Müşteriler"
+                    : "Hagy AI Asistan"}
               </h2>
               <p className="text-xs text-gray-500">
                 Hagy Business Yönetim Merkezi
@@ -814,18 +771,16 @@ export default function BusinessDashboardPage() {
         </header>
 
         <main className="mx-auto max-w-7xl px-5 py-8 sm:px-8">
-          {activeTab === "overview" && (
+          {tab === "overview" && (
             <div className="space-y-8">
-              <div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-center">
+              <div className="flex flex-wrap items-center justify-between gap-5">
                 <div>
                   <p className="mb-2 text-sm text-purple-400">
                     İşletme Kontrol Merkezi
                   </p>
-
                   <h1 className="text-3xl font-bold sm:text-4xl">
                     Hoş geldin, {fullName.split(" ")[0]} 👋
                   </h1>
-
                   <p className="mt-3 text-sm text-gray-400">
                     {companyName} için tüm iş süreçlerini
                     tek merkezden yönet.
@@ -834,8 +789,8 @@ export default function BusinessDashboardPage() {
 
                 <button
                   type="button"
-                  onClick={() => openTab("assistant")}
-                  className="flex items-center justify-center gap-2 rounded-xl bg-purple-600 px-5 py-3 font-semibold"
+                  onClick={() => setTab("assistant")}
+                  className="flex items-center gap-2 rounded-xl bg-purple-600 px-5 py-3"
                 >
                   <Sparkles size={18} />
                   AI Asistanı Aç
@@ -845,88 +800,62 @@ export default function BusinessDashboardPage() {
               <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
                 {[
                   {
-                    title: "Toplam Müşteri",
-                    value: customersLoading
-                      ? "..."
-                      : String(customers.length),
+                    label: "Toplam Müşteri",
+                    value: loading ? "..." : String(customers.length),
                     icon: Users,
-                    detail: "Gerçek müşteri kayıtları",
                   },
                   {
-                    title: "Aktif Müşteriler",
-                    value: customersLoading
-                      ? "..."
-                      : String(activeCustomers),
-                    icon: CheckCircle2,
-                    detail: "Aktif müşteri sayısı",
+                    label: "Aktif Müşteriler",
+                    value: loading ? "..." : String(activeCustomers),
+                    icon: Users,
                   },
                   {
-                    title: "Bekleyen Görevler",
+                    label: "Bekleyen Görevler",
                     value:
-                      pendingTaskCount === null
+                      pendingTasks === null
                         ? "—"
-                        : String(pendingTaskCount),
+                        : String(pendingTasks),
                     icon: ListTodo,
-                    detail: "Gerçek görev kayıtları",
                   },
                   {
-                    title: "Aylık Gelir",
-                    value:
-                      monthlyIncome === null
-                        ? "—"
-                        : formatMoney(monthlyIncome),
+                    label: "Aylık Gelir",
+                    value: income === null ? "—" : money(income),
                     icon: Wallet,
-                    detail: "Bu ayın kayıtlı gelirleri",
                   },
                 ].map((stat) => {
                   const Icon = stat.icon;
 
                   return (
-                    <div
-                      key={stat.title}
-                      className="rounded-2xl border border-white/10 bg-white/[0.035] p-5"
-                    >
-                      <div className="mb-5 flex items-center justify-between">
+                    <div key={stat.label} className={cardClass}>
+                      <div className="mb-5 flex justify-between gap-3">
                         <span className="text-sm text-gray-400">
-                          {stat.title}
+                          {stat.label}
                         </span>
-                        <Icon
-                          size={20}
-                          className="text-purple-400"
-                        />
+                        <Icon size={20} className="text-purple-400" />
                       </div>
-
-                      <p className="break-words text-2xl font-bold sm:text-3xl">
+                      <p className="break-words text-2xl font-bold">
                         {stat.value}
-                      </p>
-
-                      <p className="mt-2 text-xs text-gray-500">
-                        {stat.detail}
                       </p>
                     </div>
                   );
                 })}
               </div>
 
-              <div className="grid gap-6 xl:grid-cols-2">
-                <section className="rounded-2xl border border-white/10 bg-white/[0.035] p-6">
-                  <div className="mb-5 flex items-center justify-between">
-                    <h3 className="text-lg font-bold">
+              <div className="grid gap-6 lg:grid-cols-2">
+                <section className={cardClass}>
+                  <div className="mb-5 flex justify-between">
+                    <h2 className="text-lg font-bold">
                       Müşteriler
-                    </h3>
-
+                    </h2>
                     <button
-                      type="button"
-                      onClick={() => openTab("customers")}
+                      onClick={() => setTab("customers")}
                       className="text-sm text-purple-400"
                     >
                       Tümünü Gör
                     </button>
                   </div>
 
-                  {customersLoading ? (
-                    <Loader2 className="animate-spin text-purple-400" />
-                  ) : customers.length === 0 ? (
+                  {customers.length === 0 ? (
                     <p className="text-sm text-gray-500">
                       Henüz müşteri eklenmedi.
                     </p>
@@ -935,7 +864,7 @@ export default function BusinessDashboardPage() {
                       {customers.slice(0, 5).map((customer) => (
                         <div
                           key={customer.id}
-                          className="flex items-center justify-between rounded-xl bg-white/5 p-4"
+                          className="flex justify-between gap-3 rounded-xl bg-white/5 p-4"
                         >
                           <span>{customer.name}</span>
                           <span className="text-xs text-purple-300">
@@ -951,20 +880,16 @@ export default function BusinessDashboardPage() {
 
                 <section className="rounded-2xl border border-purple-500/20 bg-gradient-to-br from-purple-900/40 to-[#151020] p-6">
                   <ListTodo
-                    size={35}
+                    size={34}
                     className="mb-5 text-purple-300"
                   />
-
-                  <h3 className="text-2xl font-bold">
+                  <h2 className="text-2xl font-bold">
                     Görev Yönetimi
-                  </h3>
-
-                  <p className="mt-3 text-sm leading-7 text-gray-400">
+                  </h2>
+                  <p className="mt-3 text-gray-400">
                     Toplam {taskCount ?? "—"} görev.
-                    Bekleyen görev sayısı:{" "}
-                    {pendingTaskCount ?? "—"}.
+                    Bekleyen: {pendingTasks ?? "—"}.
                   </p>
-
                   <Link
                     href="/business/tasks"
                     className="mt-6 inline-flex items-center gap-2 rounded-xl bg-purple-600 px-5 py-3"
@@ -975,122 +900,151 @@ export default function BusinessDashboardPage() {
                 </section>
               </div>
 
-              <section className="rounded-2xl border border-white/10 bg-white/[0.035] p-6">
-                <div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-center">
+              <section className={cardClass}>
+                <div className="flex flex-wrap items-center justify-between gap-4">
                   <div>
-                    <h3 className="text-xl font-bold">
+                    <h2 className="text-xl font-bold">
                       Finansal Özet
-                    </h3>
+                    </h2>
                     <p className="mt-2 text-sm text-gray-400">
-                      Bu ayın gelir ve gider kayıtları
+                      Bu ayın kayıtlı gelir ve giderleri
                     </p>
                   </div>
 
                   <Link
                     href="/business/finance"
-                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-purple-600 px-5 py-3 text-sm font-semibold"
+                    className="rounded-xl bg-purple-600 px-5 py-3 text-sm"
                   >
                     Finans Panelini Aç
-                    <ArrowRight size={17} />
                   </Link>
                 </div>
 
                 <div className="mt-6 grid gap-4 sm:grid-cols-3">
-                  <div className="rounded-xl bg-emerald-500/[0.07] p-4">
+                  <div className="rounded-xl bg-emerald-500/10 p-4">
                     <p className="text-sm text-gray-400">
                       Aylık Gelir
                     </p>
                     <p className="mt-2 break-words text-xl font-bold text-emerald-400">
-                      {monthlyIncome === null
-                        ? "—"
-                        : formatMoney(monthlyIncome)}
+                      {income === null ? "—" : money(income)}
                     </p>
                   </div>
 
-                  <div className="rounded-xl bg-red-500/[0.07] p-4">
+                  <div className="rounded-xl bg-red-500/10 p-4">
                     <p className="text-sm text-gray-400">
                       Aylık Gider
                     </p>
                     <p className="mt-2 break-words text-xl font-bold text-red-400">
-                      {monthlyExpense === null
-                        ? "—"
-                        : formatMoney(monthlyExpense)}
+                      {expense === null ? "—" : money(expense)}
                     </p>
                   </div>
 
-                  <div className="rounded-xl bg-purple-500/[0.08] p-4">
+                  <div className="rounded-xl bg-purple-500/10 p-4">
                     <p className="text-sm text-gray-400">
-                      Gelir - Gider Farkı
+                      Gelir - Gider
                     </p>
                     <p className="mt-2 break-words text-xl font-bold text-purple-300">
-                      {monthlyIncome === null ||
-                      monthlyExpense === null
+                      {income === null || expense === null
                         ? "—"
-                        : formatMoney(
-                            monthlyIncome - monthlyExpense
-                          )}
+                        : money(income - expense)}
                     </p>
                   </div>
                 </div>
 
                 <p className="mt-4 text-xs text-gray-500">
-                  Gelir-gider farkı, muhasebesel net kâr
-                  veya banka bakiyesi anlamına gelmez.
+                  Gelir-gider farkı muhasebesel net kâr değildir.
                 </p>
               </section>
+
+              <div className="grid gap-4 sm:grid-cols-3">
+                {[
+                  {
+                    href: "/business/reports",
+                    title: "Raporlar",
+                    description: "Gelir-gider ve performans analizi",
+                    icon: BarChart3,
+                  },
+                  {
+                    href: "/business/portfolio",
+                    title: "Dijital Portföy",
+                    description: "Projelerini yönet",
+                    icon: BriefcaseBusiness,
+                  },
+                  {
+                    href: "/business/settings",
+                    title: "Ayarlar",
+                    description: "İşletme bilgilerini düzenle",
+                    icon: Settings,
+                  },
+                ].map((item) => {
+                  const Icon = item.icon;
+
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      className={`${cardClass} hover:border-purple-500/40`}
+                    >
+                      <Icon
+                        size={26}
+                        className="mb-4 text-purple-400"
+                      />
+                      <h3 className="font-bold">{item.title}</h3>
+                      <p className="mt-2 text-sm text-gray-400">
+                        {item.description}
+                      </p>
+                      <p className="mt-4 text-sm text-purple-300">
+                        Modülü Aç →
+                      </p>
+                    </Link>
+                  );
+                })}
+              </div>
             </div>
           )}
 
-          {activeTab === "customers" && (
+          {tab === "customers" && (
             <section className="space-y-6">
-              <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+              <div className="flex flex-wrap items-center justify-between gap-4">
                 <div>
                   <h1 className="text-2xl font-bold">
                     Müşteri Yönetimi
                   </h1>
-
                   <p className="mt-2 text-sm text-gray-400">
-                    İşletmenin gerçek müşteri kayıtlarını yönet.
+                    Müşteri kayıtlarını yönet.
                   </p>
                 </div>
 
                 <button
                   type="button"
-                  onClick={openNewCustomer}
-                  className="flex items-center justify-center gap-2 rounded-xl bg-purple-600 px-5 py-3 font-semibold hover:bg-purple-500"
+                  onClick={newCustomer}
+                  className="flex items-center gap-2 rounded-xl bg-purple-600 px-5 py-3"
                 >
-                  <Plus size={19} />
+                  <Plus size={18} />
                   Yeni Müşteri
                 </button>
               </div>
 
               {customerError && (
-                <div
+                <p
                   role="alert"
-                  className="rounded-xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-300"
+                  className="rounded-xl bg-red-500/10 p-4 text-red-300"
                 >
                   {customerError}
-                </div>
+                </p>
               )}
 
               <div className="grid gap-4 sm:grid-cols-3">
                 {[
-                  ["Toplam Müşteri", customers.length],
-                  ["Aktif Müşteri", activeCustomers],
-                  [
-                    "Potansiyel Müşteri",
-                    customers.length - activeCustomers,
-                  ],
+                  ["Toplam", customers.length],
+                  ["Aktif", activeCustomers],
+                  ["Potansiyel", customers.length - activeCustomers],
                 ].map(([label, value]) => (
-                  <div
-                    key={String(label)}
-                    className="rounded-2xl border border-white/10 bg-white/5 p-5"
-                  >
+                  <div key={String(label)} className={cardClass}>
                     <p className="text-sm text-gray-400">
                       {label}
                     </p>
                     <p className="mt-3 text-3xl font-bold">
-                      {customersLoading ? "..." : value}
+                      {loading ? "..." : value}
                     </p>
                   </div>
                 ))}
@@ -1101,245 +1055,180 @@ export default function BusinessDashboardPage() {
                   size={18}
                   className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500"
                 />
-
                 <input
                   value={search}
-                  onChange={(event) =>
-                    setSearch(event.target.value)
-                  }
-                  placeholder="İsim, telefon veya e-posta ara..."
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder="Müşteri ara..."
                   className={`${inputClass} pl-12`}
                 />
               </div>
 
-              {customersLoading ? (
-                <div className="flex justify-center p-12">
-                  <Loader2
-                    size={30}
-                    className="animate-spin text-purple-400"
-                  />
-                </div>
-              ) : filteredCustomers.length === 0 ? (
-                <div className="rounded-2xl border border-white/10 bg-white/5 p-10 text-center">
-                  <Users
-                    size={40}
-                    className="mx-auto mb-4 text-purple-400"
-                  />
+              <div className="space-y-3">
+                {filteredCustomers.map((customer) => (
+                  <div
+                    key={customer.id}
+                    className={`${cardClass} flex flex-wrap items-center justify-between gap-4`}
+                  >
+                    <div className="min-w-0">
+                      <p className="font-semibold">
+                        {customer.name}
+                      </p>
+                      <p className="mt-1 text-sm text-gray-400">
+                        {customer.phone || "Telefon yok"}
+                      </p>
+                      {customer.email && (
+                        <p className="break-all text-sm text-gray-400">
+                          {customer.email}
+                        </p>
+                      )}
+                      {customer.notes && (
+                        <p className="mt-2 whitespace-pre-wrap text-xs text-gray-500">
+                          {customer.notes}
+                        </p>
+                      )}
+                      <span className="mt-3 inline-block rounded-full bg-purple-500/10 px-3 py-1 text-xs text-purple-300">
+                        {customer.status === "active"
+                          ? "Aktif"
+                          : "Potansiyel"}
+                      </span>
+                    </div>
 
-                  <p className="font-semibold">
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => editCustomer(customer)}
+                        className="rounded-xl border border-white/10 p-3"
+                        aria-label="Müşteriyi düzenle"
+                      >
+                        <Pencil size={17} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void deleteCustomer(customer)}
+                        disabled={deletingId !== null}
+                        className="rounded-xl border border-red-500/20 p-3 text-red-400 disabled:opacity-50"
+                        aria-label="Müşteriyi sil"
+                      >
+                        <Trash2 size={17} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+
+                {!loading && filteredCustomers.length === 0 && (
+                  <div className={`${cardClass} py-12 text-center text-gray-400`}>
                     {search
                       ? "Aradığın müşteri bulunamadı."
-                      : "Henüz müşteri kaydı yok."}
-                  </p>
+                      : "Henüz müşteri eklenmedi."}
+                  </div>
+                )}
+              </div>
 
-                  <p className="mt-2 text-sm text-gray-400">
-                    Yeni Müşteri butonuyla kayıt oluşturabilirsin.
-                  </p>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {filteredCustomers.map((customer) => (
-                    <div
-                      key={customer.id}
-                      className="flex flex-col gap-4 rounded-2xl border border-white/10 bg-white/[0.035] p-5 sm:flex-row sm:items-center sm:justify-between"
-                    >
-                      <div className="min-w-0">
-                        <p className="font-semibold">
-                          {customer.name}
-                        </p>
-
-                        {customer.phone && (
-                          <p className="mt-1 text-sm text-gray-400">
-                            {customer.phone}
-                          </p>
-                        )}
-
-                        {customer.email && (
-                          <p className="break-all text-sm text-gray-400">
-                            {customer.email}
-                          </p>
-                        )}
-
-                        {customer.notes && (
-                          <p className="mt-2 text-xs text-gray-500">
-                            {customer.notes}
-                          </p>
-                        )}
-
-                        <span
-                          className={`mt-3 inline-block rounded-full px-3 py-1 text-xs ${
-                            customer.status === "active"
-                              ? "bg-emerald-500/10 text-emerald-300"
-                              : "bg-amber-500/10 text-amber-300"
-                          }`}
-                        >
-                          {customer.status === "active"
-                            ? "Aktif"
-                            : "Potansiyel"}
-                        </span>
-                      </div>
-
-                      <div className="flex gap-2">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            openEditCustomer(customer)
-                          }
-                          className="flex items-center gap-2 rounded-xl border border-white/10 px-4 py-2 text-sm hover:bg-white/5"
-                        >
-                          <Pencil size={16} />
-                          Düzenle
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() =>
-                            void deleteCustomer(customer)
-                          }
-                          disabled={deletingId !== null}
-                          className="flex items-center gap-2 rounded-xl border border-red-500/20 px-4 py-2 text-sm text-red-300 hover:bg-red-500/10 disabled:opacity-50"
-                        >
-                          <Trash2 size={16} />
-                          Sil
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
+              <button
+                type="button"
+                onClick={() => void loadData()}
+                disabled={loading}
+                className="flex items-center gap-2 text-sm text-purple-300"
+              >
+                <RefreshCw size={16} />
+                Listeyi Yenile
+              </button>
             </section>
           )}
 
-          {activeTab === "assistant" && (
+          {tab === "assistant" && (
             <section className="mx-auto max-w-4xl">
               <div className="mb-8 text-center">
                 <Sparkles
                   size={40}
                   className="mx-auto mb-5 text-purple-400"
                 />
-
                 <h1 className="text-3xl font-bold">
                   Hagy AI Asistan
                 </h1>
-
                 <p className="mt-3 text-sm text-gray-400">
                   İşletmen için yapay zekâ destekli asistan
                 </p>
               </div>
 
-              <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-5 sm:p-8">
-                <div className="mb-6 rounded-2xl bg-purple-500/10 p-5">
-                  <p className="mb-2 font-semibold text-purple-300">
+              <div className={cardClass}>
+                <div className="mb-5 rounded-xl bg-purple-500/10 p-5">
+                  <p className="font-semibold text-purple-300">
                     Hagy AI
                   </p>
-
-                  <p className="text-sm leading-7 text-gray-300">
-                    Merhaba! Ben Hagy AI Asistan.
-                    İşletmenle ilgili sorularını yanıtlamak
-                    için buradayım.
+                  <p className="mt-2 text-sm text-gray-300">
+                    Merhaba! İşletmenle ilgili sorularını
+                    yanıtlamak için buradayım.
+                  </p>
+                  <p className="mt-3 text-xs text-gray-500">
+                    AI yanıtları için sunucuda geçerli API anahtarı
+                    ve kullanılabilir API bakiyesi gereklidir.
                   </p>
                 </div>
 
                 <div
                   aria-live="polite"
-                  className="mb-6 max-h-[450px] space-y-4 overflow-y-auto"
+                  className="mb-6 max-h-[450px] space-y-3 overflow-y-auto"
                 >
-                  {messages.map((message, index) => (
+                  {messages.map((item, index) => (
                     <div
                       key={index}
-                      className={`rounded-2xl p-5 ${
-                        message.role === "user"
+                      className={`rounded-xl p-4 ${
+                        item.role === "user"
                           ? "ml-6 bg-purple-600/20"
-                          : "mr-6 border border-white/10 bg-white/5"
+                          : "mr-6 bg-white/5"
                       }`}
                     >
-                      <p className="mb-2 text-xs font-semibold text-purple-300">
-                        {message.role === "user"
-                          ? "Sen"
-                          : "Hagy AI"}
+                      <p className="mb-2 text-xs text-purple-300">
+                        {item.role === "user" ? "Sen" : "Hagy AI"}
                       </p>
-
-                      <p className="whitespace-pre-wrap text-sm leading-7 text-gray-200">
-                        {message.content}
+                      <p className="whitespace-pre-wrap text-sm">
+                        {item.content}
                       </p>
                     </div>
                   ))}
 
                   {aiLoading && (
-                    <div className="flex items-center gap-3 p-4 text-sm text-gray-400">
-                      <Loader2
-                        size={18}
-                        className="animate-spin"
-                      />
-                      Hagy AI yanıt hazırlıyor...
-                    </div>
+                    <p className="text-sm text-gray-400">
+                      Yanıt hazırlanıyor...
+                    </p>
                   )}
                 </div>
 
                 {aiError && (
-                  <div
+                  <p
                     role="alert"
-                    className="mb-5 rounded-xl bg-red-500/10 p-4 text-sm text-red-300"
+                    className="mb-4 rounded-xl bg-red-500/10 p-4 text-sm text-red-300"
                   >
                     {aiError}
-                  </div>
+                  </p>
                 )}
 
-                <form onSubmit={handleAiSubmit}>
+                <form onSubmit={sendAi}>
                   <textarea
                     value={aiMessage}
                     onChange={(event) =>
                       setAiMessage(event.target.value)
                     }
-                    placeholder="Hagy AI'ya bir şey sor..."
                     rows={4}
                     maxLength={2000}
                     disabled={aiLoading}
+                    placeholder="Hagy AI'ya bir şey sor..."
                     className={`${inputClass} resize-none`}
                   />
 
-                  <div className="mt-4 flex items-center justify-between">
-                    <span className="text-xs text-gray-500">
-                      {aiMessage.length}/2000
-                    </span>
-
+                  <div className="mt-4 flex justify-end">
                     <button
                       type="submit"
-                      disabled={
-                        !aiMessage.trim() || aiLoading
-                      }
-                      className="flex items-center gap-2 rounded-xl bg-purple-600 px-6 py-3 text-sm font-semibold disabled:opacity-50"
+                      disabled={!aiMessage.trim() || aiLoading}
+                      className="flex items-center gap-2 rounded-xl bg-purple-600 px-6 py-3 disabled:opacity-50"
                     >
-                      <Send size={18} />
+                      <Send size={17} />
                       Mesaj Gönder
                     </button>
                   </div>
                 </form>
               </div>
-            </section>
-          )}
-
-          {(
-            [
-              "analytics",
-              "portfolio",
-              "settings",
-            ] as MenuId[]
-          ).includes(activeTab) && (
-            <section className="mx-auto max-w-2xl py-12 text-center">
-              <ShieldCheck
-                size={42}
-                className="mx-auto mb-6 text-purple-400"
-              />
-
-              <h1 className="text-3xl font-bold">
-                {activeItem?.label}
-              </h1>
-
-              <p className="mt-4 text-gray-400">
-                Bu modülün arayüzü hazır. Gerçek veri
-                bağlantısını sonraki aşamada kuracağız.
-              </p>
             </section>
           )}
 
@@ -1349,17 +1238,13 @@ export default function BusinessDashboardPage() {
         </main>
       </div>
 
-      {showCustomerForm && (
+      {formOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-4">
           <div
             role="dialog"
             aria-modal="true"
-            aria-label={
-              editingId
-                ? "Müşteriyi düzenle"
-                : "Yeni müşteri ekle"
-            }
-            className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-3xl border border-white/10 bg-[#151020] p-6"
+            aria-label="Müşteri formu"
+            className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-3xl border border-white/10 bg-[#171123] p-6"
           >
             <div className="mb-6 flex items-center justify-between">
               <h2 className="text-xl font-bold">
@@ -1370,8 +1255,8 @@ export default function BusinessDashboardPage() {
 
               <button
                 type="button"
-                onClick={closeCustomerForm}
-                disabled={savingCustomer}
+                onClick={() => setFormOpen(false)}
+                disabled={saving}
                 aria-label="Kapat"
               >
                 <X size={22} />
@@ -1387,15 +1272,11 @@ export default function BusinessDashboardPage() {
               </p>
             )}
 
-            <form
-              onSubmit={saveCustomer}
-              className="space-y-4"
-            >
+            <form onSubmit={saveCustomer} className="space-y-4">
               <div>
                 <label className="mb-2 block text-sm">
                   Müşteri Adı *
                 </label>
-
                 <input
                   required
                   maxLength={150}
@@ -1406,7 +1287,6 @@ export default function BusinessDashboardPage() {
                       name: event.target.value,
                     }))
                   }
-                  placeholder="Ahmet Yılmaz"
                   className={inputClass}
                 />
               </div>
@@ -1415,7 +1295,6 @@ export default function BusinessDashboardPage() {
                 <label className="mb-2 block text-sm">
                   Telefon
                 </label>
-
                 <input
                   type="tel"
                   maxLength={40}
@@ -1426,7 +1305,6 @@ export default function BusinessDashboardPage() {
                       phone: event.target.value,
                     }))
                   }
-                  placeholder="05XX XXX XX XX"
                   className={inputClass}
                 />
               </div>
@@ -1435,7 +1313,6 @@ export default function BusinessDashboardPage() {
                 <label className="mb-2 block text-sm">
                   E-posta
                 </label>
-
                 <input
                   type="email"
                   maxLength={254}
@@ -1446,16 +1323,14 @@ export default function BusinessDashboardPage() {
                       email: event.target.value,
                     }))
                   }
-                  placeholder="ornek@email.com"
                   className={inputClass}
                 />
               </div>
 
               <div>
                 <label className="mb-2 block text-sm">
-                  Müşteri Durumu
+                  Durum
                 </label>
-
                 <select
                   value={customerForm.status}
                   onChange={(event) =>
@@ -1468,12 +1343,8 @@ export default function BusinessDashboardPage() {
                   }
                   className={inputClass}
                 >
-                  <option value="potential">
-                    Potansiyel
-                  </option>
-                  <option value="active">
-                    Aktif
-                  </option>
+                  <option value="potential">Potansiyel</option>
+                  <option value="active">Aktif</option>
                 </select>
               </div>
 
@@ -1481,7 +1352,6 @@ export default function BusinessDashboardPage() {
                 <label className="mb-2 block text-sm">
                   Notlar
                 </label>
-
                 <textarea
                   rows={3}
                   maxLength={2000}
@@ -1492,7 +1362,6 @@ export default function BusinessDashboardPage() {
                       notes: event.target.value,
                     }))
                   }
-                  placeholder="Müşteri hakkında not..."
                   className={`${inputClass} resize-none`}
                 />
               </div>
@@ -1500,25 +1369,19 @@ export default function BusinessDashboardPage() {
               <div className="flex gap-3 pt-3">
                 <button
                   type="button"
-                  onClick={closeCustomerForm}
-                  disabled={savingCustomer}
-                  className="flex-1 rounded-xl border border-white/10 px-5 py-3"
+                  onClick={() => setFormOpen(false)}
+                  disabled={saving}
+                  className="flex-1 rounded-xl border border-white/10 p-3"
                 >
                   İptal
                 </button>
 
                 <button
                   type="submit"
-                  disabled={savingCustomer}
-                  className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-purple-600 px-5 py-3 font-semibold disabled:opacity-50"
+                  disabled={saving}
+                  className="flex-1 rounded-xl bg-purple-600 p-3 font-semibold disabled:opacity-50"
                 >
-                  {savingCustomer && (
-                    <Loader2
-                      size={17}
-                      className="animate-spin"
-                    />
-                  )}
-                  {savingCustomer
+                  {saving
                     ? "Kaydediliyor..."
                     : editingId
                       ? "Güncelle"
