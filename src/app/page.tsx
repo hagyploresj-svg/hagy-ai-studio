@@ -68,13 +68,13 @@ export default function Home() {
             </Link>
 
             <Link
-              href="/edit"
+              href="/edit/workspace"
               className="btn-ghost flex items-center justify-center gap-2"
             >
               <Clapperboard size={18} />
               {lang === "tr"
-                ? "Video Editörü"
-                : "Video Editor"}
+                ? "Profesyonel Video Editörü"
+                : "Professional Video Editor"}
             </Link>
           </div>
         </motion.div>
@@ -94,10 +94,7 @@ export default function Home() {
               {t(`${k}.items`)
                 .split("|")
                 .map((item) => (
-                  <li
-                    key={item}
-                    className="flex gap-2"
-                  >
+                  <li key={item} className="flex gap-2">
                     <Check
                       size={16}
                       className="mt-0.5 shrink-0 text-pink"
@@ -110,7 +107,7 @@ export default function Home() {
         ))}
       </section>
 
-      {/* NEW EDIT STUDIO SECTION */}
+      {/* PROFESSIONAL EDIT STUDIO SECTION */}
       <section className="mx-auto mt-20 max-w-6xl px-4">
         <div className="relative overflow-hidden rounded-3xl border border-violet/30 bg-gradient-to-br from-violet/20 via-[#151525] to-[#090912] p-6 md:p-10">
           <div className="pointer-events-none absolute -right-20 -top-20 h-72 w-72 rounded-full bg-violet/20 blur-[90px]" />
@@ -119,19 +116,19 @@ export default function Home() {
             <div>
               <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-violet/30 bg-violet/10 px-4 py-2 text-xs font-semibold text-violet">
                 <Sparkles size={15} />
-                HAGY EDIT STUDIO
+                HAGY PROFESSIONAL EDIT STUDIO
               </div>
 
               <h2 className="text-3xl font-extrabold leading-tight md:text-4xl">
                 {lang === "tr"
-                  ? "Videolarını Kendi Tarzında Düzenle"
-                  : "Edit Videos Your Way"}
+                  ? "Profesyonel Video Düzenleme Stüdyosu"
+                  : "Professional Video Editing Studio"}
               </h2>
 
               <p className="mt-5 max-w-lg text-sm leading-7 text-white/60">
                 {lang === "tr"
-                  ? "Videonu yükle, ses efektleri ekle, zamanlamayı ayarla ve kendi sinematik editlerini hazırlamaya başla."
-                  : "Upload your video, add sound effects, adjust timing and start creating your own cinematic edits."}
+                  ? "Videonu yükle, zaman çizelgesinde düzenle, metin ekle, filtreleri dene ve kendi sinematik editlerini hazırla."
+                  : "Upload your video, edit on the timeline, add text, explore filters and create cinematic edits."}
               </p>
 
               <div className="mt-6 flex flex-wrap gap-3">
@@ -142,25 +139,38 @@ export default function Home() {
 
                 <span className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/70">
                   <Volume2 size={15} />
-                  Sound Effects
+                  Audio Controls
                 </span>
 
                 <span className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/70">
                   <Music2 size={15} />
-                  Audio Controls
+                  Sound Effects
                 </span>
               </div>
 
-              <Link
-                href="/edit"
-                className="btn-primary mt-8 inline-flex items-center justify-center gap-2"
-              >
-                {lang === "tr"
-                  ? "Video Editörünü Aç"
-                  : "Open Video Editor"}
+              <div className="mt-8 flex flex-wrap gap-3">
+                <Link
+                  href="/edit/workspace"
+                  className="btn-primary inline-flex items-center justify-center gap-2"
+                >
+                  {lang === "tr"
+                    ? "Profesyonel Editörü Aç"
+                    : "Open Professional Editor"}
 
-                <ArrowRight size={18} />
-              </Link>
+                  <ArrowRight size={18} />
+                </Link>
+
+                <Link
+                  href="/edit"
+                  className="btn-ghost inline-flex items-center justify-center gap-2"
+                >
+                  <Music2 size={18} />
+
+                  {lang === "tr"
+                    ? "Meme Ses Kütüphanesi"
+                    : "Meme Sound Library"}
+                </Link>
+              </div>
             </div>
 
             {/* EDITOR PREVIEW */}
@@ -171,7 +181,7 @@ export default function Home() {
                 <div className="h-2.5 w-2.5 rounded-full bg-green-400" />
 
                 <span className="ml-3 text-xs text-white/40">
-                  HAGY Edit Studio
+                  HAGY Professional Edit Studio
                 </span>
               </div>
 
@@ -245,10 +255,7 @@ export default function Home() {
 
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {templates.slice(0, 3).map((item) => (
-            <TemplateCard
-              key={item.id}
-              tpl={item}
-            />
+            <TemplateCard key={item.id} tpl={item} />
           ))}
         </div>
       </section>
@@ -267,29 +274,22 @@ export default function Home() {
         </p>
 
         <div className="mt-6 grid gap-4 md:grid-cols-3">
-          {["Starter", "Creator", "Agency"].map(
-            (name) => (
-              <div
-                key={name}
-                className="card p-6"
+          {["Starter", "Creator", "Agency"].map((name) => (
+            <div key={name} className="card p-6">
+              <h3 className="font-bold">{name}</h3>
+
+              <p className="mt-4 text-2xl text-white/50">
+                {t("price.tbd")}
+              </p>
+
+              <button
+                disabled
+                className="btn-ghost mt-6 w-full"
               >
-                <h3 className="font-bold">
-                  {name}
-                </h3>
-
-                <p className="mt-4 text-2xl text-white/50">
-                  {t("price.tbd")}
-                </p>
-
-                <button
-                  disabled
-                  className="btn-ghost mt-6 w-full"
-                >
-                  Placeholder
-                </button>
-              </div>
-            )
-          )}
+                Placeholder
+              </button>
+            </div>
+          ))}
         </div>
       </section>
     </main>
