@@ -17,18 +17,18 @@ import {
   LogOut,
   Menu,
   X,
-  Bell,
-  Search,
-  ArrowUpRight,
-  Clock3,
-  CheckCircle2,
-  Circle,
   Sparkles,
   Building2,
   ShieldCheck,
   Loader2,
   RefreshCw,
+  Plus,
+  Pencil,
+  Trash2,
+  Search,
   Send,
+  CheckCircle2,
+  Circle,
 } from "lucide-react";
 
 const supabase = createClient(
@@ -53,9 +53,36 @@ type MenuId =
   | "portfolio"
   | "settings";
 
+type Customer = {
+  id: string;
+  user_id: string;
+  name: string;
+  phone: string | null;
+  email: string | null;
+  status: "potential" | "active";
+  notes: string | null;
+  created_at: string;
+};
+
+type CustomerForm = {
+  name: string;
+  phone: string;
+  email: string;
+  status: "potential" | "active";
+  notes: string;
+};
+
 type ChatMessage = {
   role: "user" | "assistant";
   content: string;
+};
+
+const emptyForm: CustomerForm = {
+  name: "",
+  phone: "",
+  email: "",
+  status: "potential",
+  notes: "",
 };
 
 const menuItems = [
@@ -75,12 +102,6 @@ const demoTasks = [
   "Yeni müşteri görüşmesi",
 ];
 
-const demoCustomers = [
-  { name: "Örnek Mimarlık", status: "Aktif" },
-  { name: "Demo Teknoloji", status: "Görüşülüyor" },
-  { name: "Örnek Mobilya", status: "Aktif" },
-];
-
 export default function BusinessDashboardPage() {
   const router = useRouter();
 
@@ -93,7 +114,17 @@ export default function BusinessDashboardPage() {
   const [loggingOut, setLoggingOut] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
 
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [customersLoading, setCustomersLoading] = useState(false);
+  const [customerError, setCustomerError] = useState("");
   const [search, setSearch] = useState("");
+  const [showCustomerForm, setShowCustomerForm] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [customerForm, setCustomerForm] =
+    useState<CustomerForm>(emptyForm);
+  const [savingCustomer, setSavingCustomer] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
   const [completedTasks, setCompletedTasks] =
     useState<number[]>([2]);
 
@@ -179,6 +210,39 @@ export default function BusinessDashboardPage() {
     };
   }, [router, refreshKey]);
 
+  useEffect(() => {
+    if (accessStatus !== "approved" || !user) return;
+
+    let cancelled = false;
+
+    async function loadCustomers() {
+      setCustomersLoading(true);
+      setCustomerError("");
+
+      const { data, error } = await supabase
+        .from("business_customers")
+        .select("*")
+        .eq("user_id", user!.id)
+        .order("created_at", { ascending: false });
+
+      if (cancelled) return;
+
+      if (error) {
+        setCustomerError("Müşteriler yüklenemedi: " + error.message);
+      } else {
+        setCustomers((data ?? []) as Customer[]);
+      }
+
+      setCustomersLoading(false);
+    }
+
+    void loadCustomers();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [accessStatus, user]);
+
   const companyName =
     typeof user?.user_metadata?.company_name === "string"
       ? user.user_metadata.company_name
@@ -192,6 +256,22 @@ export default function BusinessDashboardPage() {
   const activeItem = menuItems.find(
     (item) => item.id === activeTab
   );
+
+  const activeCustomers = customers.filter(
+    (customer) => customer.status === "active"
+  ).length;
+
+  const filteredCustomers = customers.filter((customer) => {
+    const query = search.toLocaleLowerCase("tr-TR");
+
+    return (
+      customer.name.toLocaleLowerCase("tr-TR").includes(query) ||
+      (customer.phone ?? "").includes(search) ||
+      (customer.email ?? "")
+        .toLocaleLowerCase("tr-TR")
+        .includes(query)
+    );
+  });
 
   async function handleLogout() {
     setLoggingOut(true);
@@ -211,6 +291,147 @@ export default function BusinessDashboardPage() {
         ? current.filter((item) => item !== index)
         : [...current, index]
     );
+  }
+
+  function openNewCustomer() {
+    setCustomerForm({ ...emptyForm });
+    setEditingId(null);
+    setCustomerError("");
+    setShowCustomerForm(true);
+  }
+
+  function openEditCustomer(customer: Customer) {
+    setCustomerForm({
+      name: customer.name,
+      phone: customer.phone ?? "",
+      email: customer.email ?? "",
+      status: customer.status,
+      notes: customer.notes ?? "",
+    });
+
+    setEditingId(customer.id);
+    setCustomerError("");
+    setShowCustomerForm(true);
+  }
+
+  function closeCustomerForm() {
+    if (savingCustomer) return;
+    setShowCustomerForm(false);
+    setEditingId(null);
+    setCustomerForm({ ...emptyForm });
+  }
+
+  async function saveCustomer(
+    event: React.FormEvent<HTMLFormElement>
+  ) {
+    event.preventDefault();
+
+    if (!user || savingCustomer) return;
+
+    const name = customerForm.name.trim();
+
+    if (!name) {
+      setCustomerError("Müşteri adı zorunludur.");
+      return;
+    }
+
+    if (name.length > 150) {
+      setCustomerError("Müşteri adı çok uzun.");
+      return;
+    }
+
+    setSavingCustomer(true);
+    setCustomerError("");
+
+    const payload = {
+      name,
+      phone: customerForm.phone.trim() || null,
+      email: customerForm.email.trim() || null,
+      status: customerForm.status,
+      notes: customerForm.notes.trim() || null,
+    };
+
+    try {
+      if (editingId) {
+        const { data, error } = await supabase
+          .from("business_customers")
+          .update(payload)
+          .eq("id", editingId)
+          .eq("user_id", user.id)
+          .select("*")
+          .single();
+
+        if (error) throw error;
+
+        setCustomers((current) =>
+          current.map((customer) =>
+            customer.id === editingId
+              ? (data as Customer)
+              : customer
+          )
+        );
+      } else {
+        const { data, error } = await supabase
+          .from("business_customers")
+          .insert({
+            ...payload,
+            user_id: user.id,
+          })
+          .select("*")
+          .single();
+
+        if (error) throw error;
+
+        setCustomers((current) => [
+          data as Customer,
+          ...current,
+        ]);
+      }
+
+      setShowCustomerForm(false);
+      setEditingId(null);
+      setCustomerForm({ ...emptyForm });
+    } catch (error) {
+      setCustomerError(
+        error instanceof Error
+          ? error.message
+          : "Müşteri kaydedilemedi."
+      );
+    } finally {
+      setSavingCustomer(false);
+    }
+  }
+
+  async function deleteCustomer(customer: Customer) {
+    if (!user || deletingId) return;
+
+    const confirmed = window.confirm(
+      `${customer.name} adlı müşteriyi kalıcı olarak silmek istiyor musun?`
+    );
+
+    if (!confirmed) return;
+
+    setDeletingId(customer.id);
+    setCustomerError("");
+
+    const { data, error } = await supabase
+      .from("business_customers")
+      .delete()
+      .eq("id", customer.id)
+      .eq("user_id", user.id)
+      .select("id");
+
+    if (error || !data?.length) {
+      setCustomerError(
+        error?.message ?? "Müşteri silinemedi."
+      );
+    } else {
+      setCustomers((current) =>
+        current.filter((item) => item.id !== customer.id)
+      );
+    }
+
+    setDeletingId(null);
   }
 
   async function handleAiSubmit(
@@ -243,9 +464,7 @@ export default function BusinessDashboardPage() {
       } = await supabase.auth.getSession();
 
       if (sessionError || !session?.access_token) {
-        throw new Error(
-          "Oturumunuz sona ermiş. Lütfen yeniden giriş yapın."
-        );
+        throw new Error("Lütfen yeniden giriş yapın.");
       }
 
       const response = await fetch("/api/ai/chat", {
@@ -261,7 +480,7 @@ export default function BusinessDashboardPage() {
 
       if (!response.ok) {
         throw new Error(
-          data?.error || "AI servisine bağlanılamadı."
+          data?.error || "AI yanıtı alınamadı."
         );
       }
 
@@ -277,25 +496,26 @@ export default function BusinessDashboardPage() {
       setAiError(
         error instanceof Error
           ? error.message
-          : "Bir bağlantı hatası oluştu."
+          : "Bağlantı hatası."
       );
     } finally {
       setAiLoading(false);
     }
   }
 
+  const inputClass =
+    "w-full rounded-xl border border-white/10 bg-[#0D0A17] px-4 py-3 text-sm text-white outline-none focus:border-purple-500";
+
   if (accessStatus === "checking") {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#080610] text-white">
-        <div className="text-center">
-          <Loader2
-            size={36}
-            className="mx-auto mb-4 animate-spin text-purple-400"
-          />
-          <p className="text-sm text-gray-400">
-            İşletme erişimi kontrol ediliyor...
-          </p>
-        </div>
+        <Loader2
+          size={36}
+          className="animate-spin text-purple-400"
+        />
+        <span className="ml-3">
+          İşletme erişimi kontrol ediliyor...
+        </span>
       </div>
     );
   }
@@ -304,22 +524,10 @@ export default function BusinessDashboardPage() {
     return (
       <main className="flex min-h-screen items-center justify-center bg-[#080610] px-5 text-white">
         <div className="w-full max-w-lg rounded-3xl border border-white/10 bg-white/5 p-8 text-center">
-          <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-3xl bg-purple-500/10">
-            {accessStatus === "pending" ? (
-              <Clock3 size={38} className="text-amber-400" />
-            ) : accessStatus === "rejected" ? (
-              <X size={38} className="text-red-400" />
-            ) : (
-              <ShieldCheck
-                size={38}
-                className="text-purple-400"
-              />
-            )}
-          </div>
-
-          <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-purple-400">
-            HAGY BUSINESS PRIVATE ACCESS
-          </p>
+          <ShieldCheck
+            size={44}
+            className="mx-auto mb-6 text-purple-400"
+          />
 
           <h1 className="text-3xl font-bold">
             {accessStatus === "pending"
@@ -329,31 +537,29 @@ export default function BusinessDashboardPage() {
                 : "Erişim Doğrulanamadı"}
           </h1>
 
-          <p className="mt-5 text-sm leading-7 text-gray-400">
+          <p className="mt-5 text-gray-400">
             {accessStatus === "pending"
-              ? "İşletme hesabınız oluşturuldu. Yönetici onayından sonra paneli kullanabilirsiniz."
+              ? "Yönetici onayından sonra paneli kullanabilirsiniz."
               : accessStatus === "rejected"
                 ? "İşletme başvurunuz onaylanmadı."
-                : "Yetki kontrolü yapılamadı. Lütfen tekrar deneyin."}
+                : "Lütfen tekrar deneyin."}
           </p>
 
-          <div className="mt-8 flex flex-col gap-3">
-            <button
-              onClick={() => setRefreshKey((n) => n + 1)}
-              className="flex items-center justify-center gap-2 rounded-xl bg-purple-600 px-6 py-3 font-semibold"
-            >
-              <RefreshCw size={18} />
-              Durumu Kontrol Et
-            </button>
+          <button
+            onClick={() => setRefreshKey((n) => n + 1)}
+            className="mt-8 flex w-full items-center justify-center gap-2 rounded-xl bg-purple-600 p-3"
+          >
+            <RefreshCw size={18} />
+            Durumu Kontrol Et
+          </button>
 
-            <button
-              onClick={handleLogout}
-              disabled={loggingOut}
-              className="rounded-xl border border-white/10 px-6 py-3"
-            >
-              Çıkış Yap
-            </button>
-          </div>
+          <button
+            onClick={handleLogout}
+            disabled={loggingOut}
+            className="mt-3 w-full rounded-xl border border-white/10 p-3"
+          >
+            Çıkış Yap
+          </button>
         </div>
       </main>
     );
@@ -397,8 +603,10 @@ export default function BusinessDashboardPage() {
           </Link>
 
           <button
+            type="button"
             onClick={() => setSidebarOpen(false)}
             className="lg:hidden"
+            aria-label="Menüyü kapat"
           >
             <X size={23} />
           </button>
@@ -427,9 +635,10 @@ export default function BusinessDashboardPage() {
 
               return (
                 <button
+                  type="button"
                   key={item.id}
                   onClick={() => openTab(item.id)}
-                  className={`flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left text-sm transition ${
+                  className={`flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left text-sm ${
                     activeTab === item.id
                       ? "bg-purple-600 text-white"
                       : "text-gray-400 hover:bg-white/5 hover:text-white"
@@ -464,6 +673,7 @@ export default function BusinessDashboardPage() {
           </div>
 
           <button
+            type="button"
             onClick={handleLogout}
             disabled={loggingOut}
             className="flex w-full items-center gap-3 rounded-xl px-4 py-3 text-sm text-red-300 hover:bg-red-500/10"
@@ -478,8 +688,10 @@ export default function BusinessDashboardPage() {
         <header className="sticky top-0 z-30 flex h-20 items-center justify-between border-b border-white/10 bg-[#080610]/95 px-5 backdrop-blur-xl sm:px-8">
           <div className="flex items-center gap-4">
             <button
+              type="button"
               onClick={() => setSidebarOpen(true)}
               className="lg:hidden"
+              aria-label="Menüyü aç"
             >
               <Menu size={25} />
             </button>
@@ -494,14 +706,8 @@ export default function BusinessDashboardPage() {
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
-            <span className="hidden rounded-full border border-amber-500/20 bg-amber-500/10 px-3 py-1 text-xs text-amber-300 sm:block">
-              Demo Panel
-            </span>
-            <Bell size={20} className="text-gray-400" />
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-purple-600 font-bold">
-              {fullName.charAt(0).toUpperCase()}
-            </div>
+          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-purple-600 font-bold">
+            {fullName.charAt(0).toUpperCase()}
           </div>
         </header>
 
@@ -525,40 +731,46 @@ export default function BusinessDashboardPage() {
                 </div>
 
                 <button
+                  type="button"
                   onClick={() => openTab("assistant")}
-                  className="flex items-center justify-center gap-2 rounded-xl bg-purple-600 px-5 py-3 font-semibold hover:bg-purple-500"
+                  className="flex items-center justify-center gap-2 rounded-xl bg-purple-600 px-5 py-3 font-semibold"
                 >
                   <Sparkles size={18} />
                   AI Asistanı Aç
                 </button>
               </div>
 
-              <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4 text-sm text-amber-200">
-                İstatistikler, müşteriler ve görevler
-                şimdilik örnek verilerdir.
-              </div>
-
               <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
                 {[
                   {
                     title: "Toplam Müşteri",
-                    value: "128",
+                    value: customersLoading
+                      ? "..."
+                      : String(customers.length),
                     icon: Users,
+                    detail: "Gerçek müşteri kayıtları",
+                  },
+                  {
+                    title: "Aktif Müşteriler",
+                    value: customersLoading
+                      ? "..."
+                      : String(activeCustomers),
+                    icon: CheckCircle2,
+                    detail: "Aktif müşteri sayısı",
                   },
                   {
                     title: "Aktif Görevler",
-                    value: "14",
+                    value: String(
+                      demoTasks.length - completedTasks.length
+                    ),
                     icon: ListTodo,
+                    detail: "Demo görevler",
                   },
                   {
                     title: "Aylık Gelir",
-                    value: "₺85.400",
+                    value: "—",
                     icon: Wallet,
-                  },
-                  {
-                    title: "AI İşlemleri",
-                    value: "42",
-                    icon: Bot,
+                    detail: "Finans modülü bekleniyor",
                   },
                 ].map((stat) => {
                   const Icon = stat.icon;
@@ -583,113 +795,261 @@ export default function BusinessDashboardPage() {
                       </p>
 
                       <p className="mt-2 text-xs text-gray-500">
-                        Örnek veri
+                        {stat.detail}
                       </p>
                     </div>
                   );
                 })}
               </div>
 
-              <div className="grid gap-6 xl:grid-cols-5">
-                <section className="rounded-2xl border border-white/10 bg-white/[0.035] p-6 xl:col-span-3">
-                  <h3 className="mb-5 text-lg font-bold">
-                    Görev Takibi
-                  </h3>
+              <div className="grid gap-6 xl:grid-cols-2">
+                <section className="rounded-2xl border border-white/10 bg-white/[0.035] p-6">
+                  <div className="mb-5 flex items-center justify-between">
+                    <h3 className="text-lg font-bold">
+                      Müşteriler
+                    </h3>
 
-                  <div className="space-y-3">
-                    {demoTasks.map((task, index) => (
-                      <button
-                        key={index}
-                        onClick={() => toggleTask(index)}
-                        className="flex w-full items-center gap-4 rounded-xl border border-white/5 bg-white/5 p-4 text-left"
-                      >
-                        {completedTasks.includes(index) ? (
-                          <CheckCircle2
-                            size={21}
-                            className="text-emerald-400"
-                          />
-                        ) : (
-                          <Circle
-                            size={21}
-                            className="text-gray-500"
-                          />
-                        )}
-
-                        <span
-                          className={
-                            completedTasks.includes(index)
-                              ? "text-gray-500 line-through"
-                              : ""
-                          }
-                        >
-                          {task}
-                        </span>
-                      </button>
-                    ))}
+                    <button
+                      type="button"
+                      onClick={() => openTab("customers")}
+                      className="text-sm text-purple-400"
+                    >
+                      Tümünü Gör
+                    </button>
                   </div>
+
+                  {customersLoading ? (
+                    <Loader2 className="animate-spin text-purple-400" />
+                  ) : customers.length === 0 ? (
+                    <p className="text-sm text-gray-500">
+                      Henüz müşteri eklenmedi.
+                    </p>
+                  ) : (
+                    <div className="space-y-3">
+                      {customers.slice(0, 5).map((customer) => (
+                        <div
+                          key={customer.id}
+                          className="flex items-center justify-between rounded-xl bg-white/5 p-4"
+                        >
+                          <span>{customer.name}</span>
+                          <span className="text-xs text-purple-300">
+                            {customer.status === "active"
+                              ? "Aktif"
+                              : "Potansiyel"}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </section>
 
-                <section className="rounded-2xl border border-purple-500/20 bg-gradient-to-br from-purple-900/40 to-[#151020] p-6 xl:col-span-2">
-                  <div className="mb-6 flex h-12 w-12 items-center justify-center rounded-2xl bg-purple-500/20">
-                    <Bot
-                      size={25}
-                      className="text-purple-300"
-                    />
-                  </div>
+                <section className="rounded-2xl border border-purple-500/20 bg-gradient-to-br from-purple-900/40 to-[#151020] p-6">
+                  <Bot
+                    size={35}
+                    className="mb-5 text-purple-300"
+                  />
 
                   <h3 className="text-2xl font-bold">
-                    İşletmenin AI Asistanı
+                    Hagy AI Asistan
                   </h3>
 
                   <p className="mt-3 text-sm leading-7 text-gray-400">
-                    Satış, pazarlama, görev planlama ve
-                    işletme yönetimi konularında yapay zekâ
-                    desteği al.
+                    Satış, pazarlama ve işletme yönetimi
+                    konusunda yapay zekâ desteği.
+                  </p>
+
+                  <p className="mt-2 text-xs text-amber-300">
+                    Gerçek AI yanıtları için API kredisi gerekir.
                   </p>
 
                   <button
+                    type="button"
                     onClick={() => openTab("assistant")}
-                    className="mt-8 flex items-center gap-2 rounded-xl bg-purple-600 px-5 py-3 font-semibold"
+                    className="mt-6 rounded-xl bg-purple-600 px-5 py-3"
                   >
                     Asistanı Aç
-                    <ArrowUpRight size={18} />
                   </button>
                 </section>
               </div>
-
-              <section className="rounded-2xl border border-white/10 bg-white/[0.035] p-6">
-                <h3 className="mb-5 text-lg font-bold">
-                  Müşteri Yönetimi
-                </h3>
-
-                <div className="space-y-3">
-                  {demoCustomers.map((customer) => (
-                    <div
-                      key={customer.name}
-                      className="flex items-center justify-between rounded-xl bg-white/5 p-4"
-                    >
-                      <p className="font-semibold">
-                        {customer.name}
-                      </p>
-                      <span className="text-xs text-purple-300">
-                        {customer.status}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </section>
             </div>
           )}
 
-          {activeTab === "assistant" && (
-            <div className="mx-auto max-w-4xl">
-              <div className="mb-8 text-center">
-                <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-purple-600/20">
-                  <Sparkles
-                    size={32}
-                    className="text-purple-400"
+          {activeTab === "customers" && (
+            <section className="space-y-6">
+              <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+                <div>
+                  <h1 className="text-2xl font-bold">
+                    Müşteri Yönetimi
+                  </h1>
+
+                  <p className="mt-2 text-sm text-gray-400">
+                    İşletmenin gerçek müşteri kayıtlarını yönet.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={openNewCustomer}
+                  className="flex items-center justify-center gap-2 rounded-xl bg-purple-600 px-5 py-3 font-semibold hover:bg-purple-500"
+                >
+                  <Plus size={19} />
+                  Yeni Müşteri
+                </button>
+              </div>
+
+              {customerError && (
+                <div
+                  role="alert"
+                  className="rounded-xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-300"
+                >
+                  {customerError}
+                </div>
+              )}
+
+              <div className="grid gap-4 sm:grid-cols-3">
+                {[
+                  ["Toplam Müşteri", customers.length],
+                  ["Aktif Müşteri", activeCustomers],
+                  [
+                    "Potansiyel Müşteri",
+                    customers.length - activeCustomers,
+                  ],
+                ].map(([label, value]) => (
+                  <div
+                    key={String(label)}
+                    className="rounded-2xl border border-white/10 bg-white/5 p-5"
+                  >
+                    <p className="text-sm text-gray-400">
+                      {label}
+                    </p>
+                    <p className="mt-3 text-3xl font-bold">
+                      {customersLoading ? "..." : value}
+                    </p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="relative">
+                <Search
+                  size={18}
+                  className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500"
+                />
+
+                <input
+                  value={search}
+                  onChange={(event) =>
+                    setSearch(event.target.value)
+                  }
+                  placeholder="İsim, telefon veya e-posta ara..."
+                  className={`${inputClass} pl-12`}
+                />
+              </div>
+
+              {customersLoading ? (
+                <div className="flex justify-center p-12">
+                  <Loader2
+                    size={30}
+                    className="animate-spin text-purple-400"
                   />
                 </div>
+              ) : filteredCustomers.length === 0 ? (
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-10 text-center">
+                  <Users
+                    size={40}
+                    className="mx-auto mb-4 text-purple-400"
+                  />
+
+                  <p className="font-semibold">
+                    {search
+                      ? "Aradığın müşteri bulunamadı."
+                      : "Henüz müşteri kaydı yok."}
+                  </p>
+
+                  <p className="mt-2 text-sm text-gray-400">
+                    Yeni Müşteri butonuyla kayıt oluşturabilirsin.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {filteredCustomers.map((customer) => (
+                    <div
+                      key={customer.id}
+                      className="flex flex-col gap-4 rounded-2xl border border-white/10 bg-white/[0.035] p-5 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <div className="min-w-0">
+                        <p className="font-semibold">
+                          {customer.name}
+                        </p>
+
+                        {customer.phone && (
+                          <p className="mt-1 text-sm text-gray-400">
+                            {customer.phone}
+                          </p>
+                        )}
+
+                        {customer.email && (
+                          <p className="break-all text-sm text-gray-400">
+                            {customer.email}
+                          </p>
+                        )}
+
+                        {customer.notes && (
+                          <p className="mt-2 text-xs text-gray-500">
+                            {customer.notes}
+                          </p>
+                        )}
+
+                        <span
+                          className={`mt-3 inline-block rounded-full px-3 py-1 text-xs ${
+                            customer.status === "active"
+                              ? "bg-emerald-500/10 text-emerald-300"
+                              : "bg-amber-500/10 text-amber-300"
+                          }`}
+                        >
+                          {customer.status === "active"
+                            ? "Aktif"
+                            : "Potansiyel"}
+                        </span>
+                      </div>
+
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            openEditCustomer(customer)
+                          }
+                          className="flex items-center gap-2 rounded-xl border border-white/10 px-4 py-2 text-sm hover:bg-white/5"
+                        >
+                          <Pencil size={16} />
+                          Düzenle
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() =>
+                            void deleteCustomer(customer)
+                          }
+                          disabled={deletingId !== null}
+                          className="flex items-center gap-2 rounded-xl border border-red-500/20 px-4 py-2 text-sm text-red-300 hover:bg-red-500/10 disabled:opacity-50"
+                        >
+                          <Trash2 size={16} />
+                          Sil
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          )}
+
+          {activeTab === "assistant" && (
+            <section className="mx-auto max-w-4xl">
+              <div className="mb-8 text-center">
+                <Sparkles
+                  size={40}
+                  className="mx-auto mb-5 text-purple-400"
+                />
 
                 <h1 className="text-3xl font-bold">
                   Hagy AI Asistan
@@ -702,16 +1062,14 @@ export default function BusinessDashboardPage() {
 
               <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-5 sm:p-8">
                 <div className="mb-6 rounded-2xl bg-purple-500/10 p-5">
-                  <div className="mb-2 flex items-center gap-2 font-semibold text-purple-300">
-                    <Bot size={20} />
+                  <p className="mb-2 font-semibold text-purple-300">
                     Hagy AI
-                  </div>
+                  </p>
 
                   <p className="text-sm leading-7 text-gray-300">
                     Merhaba! Ben Hagy AI Asistan.
-                    İşletmenle ilgili sorularını
-                    yanıtlamak için buradayım.
-                    Sana nasıl yardımcı olabilirim?
+                    İşletmenle ilgili sorularını yanıtlamak
+                    için buradayım.
                   </p>
                 </div>
 
@@ -741,10 +1099,10 @@ export default function BusinessDashboardPage() {
                   ))}
 
                   {aiLoading && (
-                    <div className="flex items-center gap-3 rounded-xl bg-white/5 p-4 text-sm text-gray-400">
+                    <div className="flex items-center gap-3 p-4 text-sm text-gray-400">
                       <Loader2
                         size={18}
-                        className="animate-spin text-purple-400"
+                        className="animate-spin"
                       />
                       Hagy AI yanıt hazırlıyor...
                     </div>
@@ -754,7 +1112,7 @@ export default function BusinessDashboardPage() {
                 {aiError && (
                   <div
                     role="alert"
-                    className="mb-5 rounded-xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-300"
+                    className="mb-5 rounded-xl bg-red-500/10 p-4 text-sm text-red-300"
                   >
                     {aiError}
                   </div>
@@ -770,10 +1128,10 @@ export default function BusinessDashboardPage() {
                     rows={4}
                     maxLength={2000}
                     disabled={aiLoading}
-                    className="w-full resize-none rounded-xl border border-white/10 bg-[#0D0A17] p-4 text-sm text-white outline-none focus:border-purple-500 disabled:opacity-50"
+                    className={`${inputClass} resize-none`}
                   />
 
-                  <div className="mt-4 flex items-center justify-between gap-3">
+                  <div className="mt-4 flex items-center justify-between">
                     <span className="text-xs text-gray-500">
                       {aiMessage.length}/2000
                     </span>
@@ -783,24 +1141,15 @@ export default function BusinessDashboardPage() {
                       disabled={
                         !aiMessage.trim() || aiLoading
                       }
-                      className="flex items-center gap-2 rounded-xl bg-purple-600 px-6 py-3 text-sm font-semibold hover:bg-purple-500 disabled:opacity-50"
+                      className="flex items-center gap-2 rounded-xl bg-purple-600 px-6 py-3 text-sm font-semibold disabled:opacity-50"
                     >
-                      {aiLoading ? (
-                        <Loader2
-                          size={18}
-                          className="animate-spin"
-                        />
-                      ) : (
-                        <Send size={18} />
-                      )}
-                      {aiLoading
-                        ? "Yanıtlanıyor..."
-                        : "Mesaj Gönder"}
+                      <Send size={18} />
+                      Mesaj Gönder
                     </button>
                   </div>
                 </form>
               </div>
-            </div>
+            </section>
           )}
 
           {activeTab === "tasks" && (
@@ -809,16 +1158,19 @@ export default function BusinessDashboardPage() {
                 Görev Yönetimi
               </h1>
 
+              <p className="text-sm text-amber-300">
+                Bu bölüm henüz demo modunda.
+              </p>
+
               {demoTasks.map((task, index) => (
                 <button
+                  type="button"
                   key={index}
                   onClick={() => toggleTask(index)}
                   className="flex w-full items-center gap-4 rounded-xl border border-white/10 bg-white/5 p-5 text-left"
                 >
                   {completedTasks.includes(index) ? (
-                    <CheckCircle2
-                      className="text-emerald-400"
-                    />
+                    <CheckCircle2 className="text-emerald-400" />
                   ) : (
                     <Circle className="text-gray-500" />
                   )}
@@ -826,7 +1178,7 @@ export default function BusinessDashboardPage() {
                   <span
                     className={
                       completedTasks.includes(index)
-                        ? "line-through text-gray-500"
+                        ? "text-gray-500 line-through"
                         : ""
                     }
                   >
@@ -834,51 +1186,6 @@ export default function BusinessDashboardPage() {
                   </span>
                 </button>
               ))}
-            </section>
-          )}
-
-          {activeTab === "customers" && (
-            <section className="space-y-5">
-              <h1 className="text-2xl font-bold">
-                Müşteri Yönetimi
-              </h1>
-
-              <div className="relative">
-                <Search
-                  size={18}
-                  className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500"
-                />
-
-                <input
-                  value={search}
-                  onChange={(event) =>
-                    setSearch(event.target.value)
-                  }
-                  placeholder="Müşteri ara..."
-                  className="w-full rounded-xl border border-white/10 bg-white/5 py-3 pl-12 pr-4 outline-none focus:border-purple-500"
-                />
-              </div>
-
-              {demoCustomers
-                .filter((customer) =>
-                  customer.name
-                    .toLowerCase()
-                    .includes(search.toLowerCase())
-                )
-                .map((customer) => (
-                  <div
-                    key={customer.name}
-                    className="flex items-center justify-between rounded-xl border border-white/10 bg-white/5 p-5"
-                  >
-                    <span className="font-semibold">
-                      {customer.name}
-                    </span>
-
-                    <span className="text-xs text-purple-300">
-                      {customer.status}
-                    </span>
-                  </div>
-                ))}
             </section>
           )}
 
@@ -891,31 +1198,208 @@ export default function BusinessDashboardPage() {
             ] as MenuId[]
           ).includes(activeTab) && (
             <section className="mx-auto max-w-2xl py-12 text-center">
-              <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-3xl bg-purple-500/10">
-                <ShieldCheck
-                  size={34}
-                  className="text-purple-400"
-                />
-              </div>
+              <ShieldCheck
+                size={42}
+                className="mx-auto mb-6 text-purple-400"
+              />
 
               <h1 className="text-3xl font-bold">
                 {activeItem?.label}
               </h1>
 
-              <p className="mt-4 leading-7 text-gray-400">
-                Bu modülün arayüzü hazır.
-                Gerçek işletme verileri ve gelişmiş
-                özellikler sonraki aşamada eklenecek.
+              <p className="mt-4 text-gray-400">
+                Bu modülün arayüzü hazır. Gerçek veri
+                bağlantısını sonraki aşamada kuracağız.
               </p>
             </section>
           )}
 
-          <footer className="mt-12 flex flex-col justify-between gap-3 border-t border-white/10 pt-6 text-xs text-gray-600 sm:flex-row">
-            <p>© 2026 Hagy Business.</p>
-            <p>AI Destekli İşletme Yönetim Platformu</p>
+          <footer className="mt-12 border-t border-white/10 pt-6 text-xs text-gray-600">
+            © 2026 Hagy Business. Tüm hakları saklıdır.
           </footer>
         </main>
       </div>
+
+      {showCustomerForm && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-4">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={
+              editingId
+                ? "Müşteriyi düzenle"
+                : "Yeni müşteri ekle"
+            }
+            className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-3xl border border-white/10 bg-[#151020] p-6"
+          >
+            <div className="mb-6 flex items-center justify-between">
+              <h2 className="text-xl font-bold">
+                {editingId
+                  ? "Müşteriyi Düzenle"
+                  : "Yeni Müşteri Ekle"}
+              </h2>
+
+              <button
+                type="button"
+                onClick={closeCustomerForm}
+                disabled={savingCustomer}
+                aria-label="Kapat"
+              >
+                <X size={22} />
+              </button>
+            </div>
+
+            {customerError && (
+              <p
+                role="alert"
+                className="mb-4 rounded-xl bg-red-500/10 p-3 text-sm text-red-300"
+              >
+                {customerError}
+              </p>
+            )}
+
+            <form
+              onSubmit={saveCustomer}
+              className="space-y-4"
+            >
+              <div>
+                <label className="mb-2 block text-sm">
+                  Müşteri Adı *
+                </label>
+
+                <input
+                  required
+                  maxLength={150}
+                  value={customerForm.name}
+                  onChange={(event) =>
+                    setCustomerForm((current) => ({
+                      ...current,
+                      name: event.target.value,
+                    }))
+                  }
+                  placeholder="Ahmet Yılmaz"
+                  className={inputClass}
+                />
+              </div>
+
+              <div>
+                <label className="mb-2 block text-sm">
+                  Telefon
+                </label>
+
+                <input
+                  type="tel"
+                  maxLength={40}
+                  value={customerForm.phone}
+                  onChange={(event) =>
+                    setCustomerForm((current) => ({
+                      ...current,
+                      phone: event.target.value,
+                    }))
+                  }
+                  placeholder="05XX XXX XX XX"
+                  className={inputClass}
+                />
+              </div>
+
+              <div>
+                <label className="mb-2 block text-sm">
+                  E-posta
+                </label>
+
+                <input
+                  type="email"
+                  maxLength={254}
+                  value={customerForm.email}
+                  onChange={(event) =>
+                    setCustomerForm((current) => ({
+                      ...current,
+                      email: event.target.value,
+                    }))
+                  }
+                  placeholder="ornek@email.com"
+                  className={inputClass}
+                />
+              </div>
+
+              <div>
+                <label className="mb-2 block text-sm">
+                  Müşteri Durumu
+                </label>
+
+                <select
+                  value={customerForm.status}
+                  onChange={(event) =>
+                    setCustomerForm((current) => ({
+                      ...current,
+                      status: event.target.value as
+                        | "potential"
+                        | "active",
+                    }))
+                  }
+                  className={inputClass}
+                >
+                  <option value="potential">
+                    Potansiyel
+                  </option>
+                  <option value="active">
+                    Aktif
+                  </option>
+                </select>
+              </div>
+
+              <div>
+                <label className="mb-2 block text-sm">
+                  Notlar
+                </label>
+
+                <textarea
+                  rows={3}
+                  maxLength={2000}
+                  value={customerForm.notes}
+                  onChange={(event) =>
+                    setCustomerForm((current) => ({
+                      ...current,
+                      notes: event.target.value,
+                    }))
+                  }
+                  placeholder="Müşteri hakkında not..."
+                  className={`${inputClass} resize-none`}
+                />
+              </div>
+
+              <div className="flex gap-3 pt-3">
+                <button
+                  type="button"
+                  onClick={closeCustomerForm}
+                  disabled={savingCustomer}
+                  className="flex-1 rounded-xl border border-white/10 px-5 py-3"
+                >
+                  İptal
+                </button>
+
+                <button
+                  type="submit"
+                  disabled={savingCustomer}
+                  className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-purple-600 px-5 py-3 font-semibold disabled:opacity-50"
+                >
+                  {savingCustomer && (
+                    <Loader2
+                      size={17}
+                      className="animate-spin"
+                    />
+                  )}
+                  {savingCustomer
+                    ? "Kaydediliyor..."
+                    : editingId
+                      ? "Güncelle"
+                      : "Müşteri Ekle"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
