@@ -99,6 +99,35 @@ const menuItems = [
 const inputClass =
   "w-full rounded-xl border border-white/10 bg-[#0D0A17] px-4 py-3 text-sm text-white outline-none focus:border-purple-500";
 
+function formatMoney(amount: number) {
+  return new Intl.NumberFormat("tr-TR", {
+    style: "currency",
+    currency: "TRY",
+  }).format(amount);
+}
+
+function getCurrentMonthRange() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth();
+
+  const startDate = [
+    year,
+    String(month + 1).padStart(2, "0"),
+    "01",
+  ].join("-");
+
+  const next = new Date(year, month + 1, 1);
+
+  const endDate = [
+    next.getFullYear(),
+    String(next.getMonth() + 1).padStart(2, "0"),
+    "01",
+  ].join("-");
+
+  return { startDate, endDate };
+}
+
 export default function BusinessDashboardPage() {
   const router = useRouter();
 
@@ -124,6 +153,11 @@ export default function BusinessDashboardPage() {
 
   const [taskCount, setTaskCount] = useState<number | null>(null);
   const [pendingTaskCount, setPendingTaskCount] =
+    useState<number | null>(null);
+
+  const [monthlyIncome, setMonthlyIncome] =
+    useState<number | null>(null);
+  const [monthlyExpense, setMonthlyExpense] =
     useState<number | null>(null);
 
   const [aiMessage, setAiMessage] = useState("");
@@ -217,25 +251,38 @@ export default function BusinessDashboardPage() {
       setCustomersLoading(true);
       setCustomerError("");
 
-      const [customerResult, taskResult, pendingResult] =
-        await Promise.all([
-          supabase
-            .from("business_customers")
-            .select("*")
-            .eq("user_id", user!.id)
-            .order("created_at", { ascending: false }),
+      const { startDate, endDate } = getCurrentMonthRange();
 
-          supabase
-            .from("business_tasks")
-            .select("*", { count: "exact", head: true })
-            .eq("user_id", user!.id),
+      const [
+        customerResult,
+        taskResult,
+        pendingResult,
+        financeResult,
+      ] = await Promise.all([
+        supabase
+          .from("business_customers")
+          .select("*")
+          .eq("user_id", user!.id)
+          .order("created_at", { ascending: false }),
 
-          supabase
-            .from("business_tasks")
-            .select("*", { count: "exact", head: true })
-            .eq("user_id", user!.id)
-            .eq("status", "pending"),
-        ]);
+        supabase
+          .from("business_tasks")
+          .select("*", { count: "exact", head: true })
+          .eq("user_id", user!.id),
+
+        supabase
+          .from("business_tasks")
+          .select("*", { count: "exact", head: true })
+          .eq("user_id", user!.id)
+          .eq("status", "pending"),
+
+        supabase
+          .from("business_finances")
+          .select("type, amount")
+          .eq("user_id", user!.id)
+          .gte("transaction_date", startDate)
+          .lt("transaction_date", endDate),
+      ]);
 
       if (cancelled) return;
 
@@ -257,6 +304,32 @@ export default function BusinessDashboardPage() {
       setPendingTaskCount(
         pendingResult.error ? null : pendingResult.count ?? 0
       );
+
+      if (financeResult.error) {
+        setMonthlyIncome(null);
+        setMonthlyExpense(null);
+      } else {
+        const financeRecords = financeResult.data ?? [];
+
+        const incomeCents = financeRecords
+          .filter((record) => record.type === "income")
+          .reduce(
+            (sum, record) =>
+              sum + Math.round(Number(record.amount) * 100),
+            0
+          );
+
+        const expenseCents = financeRecords
+          .filter((record) => record.type === "expense")
+          .reduce(
+            (sum, record) =>
+              sum + Math.round(Number(record.amount) * 100),
+            0
+          );
+
+        setMonthlyIncome(incomeCents / 100);
+        setMonthlyExpense(expenseCents / 100);
+      }
 
       setCustomersLoading(false);
     }
@@ -307,6 +380,11 @@ export default function BusinessDashboardPage() {
   function openTab(tab: MenuId) {
     if (tab === "tasks") {
       router.push("/business/tasks");
+      return;
+    }
+
+    if (tab === "finance") {
+      router.push("/business/finance");
       return;
     }
 
@@ -662,7 +740,9 @@ export default function BusinessDashboardPage() {
                 >
                   <Icon size={19} />
                   {item.label}
-                  {item.id === "tasks" && (
+
+                  {(item.id === "tasks" ||
+                    item.id === "finance") && (
                     <ArrowRight
                       size={15}
                       className="ml-auto"
@@ -791,9 +871,12 @@ export default function BusinessDashboardPage() {
                   },
                   {
                     title: "Aylık Gelir",
-                    value: "—",
+                    value:
+                      monthlyIncome === null
+                        ? "—"
+                        : formatMoney(monthlyIncome),
                     icon: Wallet,
-                    detail: "Finans modülü bekleniyor",
+                    detail: "Bu ayın kayıtlı gelirleri",
                   },
                 ].map((stat) => {
                   const Icon = stat.icon;
@@ -813,7 +896,7 @@ export default function BusinessDashboardPage() {
                         />
                       </div>
 
-                      <p className="text-3xl font-bold">
+                      <p className="break-words text-2xl font-bold sm:text-3xl">
                         {stat.value}
                       </p>
 
@@ -891,6 +974,70 @@ export default function BusinessDashboardPage() {
                   </Link>
                 </section>
               </div>
+
+              <section className="rounded-2xl border border-white/10 bg-white/[0.035] p-6">
+                <div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-center">
+                  <div>
+                    <h3 className="text-xl font-bold">
+                      Finansal Özet
+                    </h3>
+                    <p className="mt-2 text-sm text-gray-400">
+                      Bu ayın gelir ve gider kayıtları
+                    </p>
+                  </div>
+
+                  <Link
+                    href="/business/finance"
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-purple-600 px-5 py-3 text-sm font-semibold"
+                  >
+                    Finans Panelini Aç
+                    <ArrowRight size={17} />
+                  </Link>
+                </div>
+
+                <div className="mt-6 grid gap-4 sm:grid-cols-3">
+                  <div className="rounded-xl bg-emerald-500/[0.07] p-4">
+                    <p className="text-sm text-gray-400">
+                      Aylık Gelir
+                    </p>
+                    <p className="mt-2 break-words text-xl font-bold text-emerald-400">
+                      {monthlyIncome === null
+                        ? "—"
+                        : formatMoney(monthlyIncome)}
+                    </p>
+                  </div>
+
+                  <div className="rounded-xl bg-red-500/[0.07] p-4">
+                    <p className="text-sm text-gray-400">
+                      Aylık Gider
+                    </p>
+                    <p className="mt-2 break-words text-xl font-bold text-red-400">
+                      {monthlyExpense === null
+                        ? "—"
+                        : formatMoney(monthlyExpense)}
+                    </p>
+                  </div>
+
+                  <div className="rounded-xl bg-purple-500/[0.08] p-4">
+                    <p className="text-sm text-gray-400">
+                      Gelir - Gider Farkı
+                    </p>
+                    <p className="mt-2 break-words text-xl font-bold text-purple-300">
+                      {monthlyIncome === null ||
+                      monthlyExpense === null
+                        ? "—"
+                        : formatMoney(
+                            monthlyIncome - monthlyExpense
+                          )}
+                    </p>
+                  </div>
+                </div>
+
+                <p className="mt-4 text-xs text-gray-500">
+                  Gelir-gider farkı, muhasebesel net kâr
+                  veya banka bakiyesi anlamına gelmez.
+                </p>
+              </section>
             </div>
           )}
 
@@ -1174,7 +1321,6 @@ export default function BusinessDashboardPage() {
 
           {(
             [
-              "finance",
               "analytics",
               "portfolio",
               "settings",
