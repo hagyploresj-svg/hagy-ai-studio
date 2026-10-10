@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient, type User } from "@supabase/supabase-js";
@@ -28,7 +28,7 @@ import {
   Search,
   Send,
   CheckCircle2,
-  Circle,
+  ArrowRight,
 } from "lucide-react";
 
 const supabase = createClient(
@@ -96,11 +96,8 @@ const menuItems = [
   { id: "settings", label: "Ayarlar", icon: Settings },
 ] as const;
 
-const demoTasks = [
-  "Müşteri teklifini hazırla",
-  "Haftalık raporu kontrol et",
-  "Yeni müşteri görüşmesi",
-];
+const inputClass =
+  "w-full rounded-xl border border-white/10 bg-[#0D0A17] px-4 py-3 text-sm text-white outline-none focus:border-purple-500";
 
 export default function BusinessDashboardPage() {
   const router = useRouter();
@@ -125,8 +122,9 @@ export default function BusinessDashboardPage() {
   const [savingCustomer, setSavingCustomer] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  const [completedTasks, setCompletedTasks] =
-    useState<number[]>([2]);
+  const [taskCount, setTaskCount] = useState<number | null>(null);
+  const [pendingTaskCount, setPendingTaskCount] =
+    useState<number | null>(null);
 
   const [aiMessage, setAiMessage] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
@@ -215,28 +213,55 @@ export default function BusinessDashboardPage() {
 
     let cancelled = false;
 
-    async function loadCustomers() {
+    async function loadData() {
       setCustomersLoading(true);
       setCustomerError("");
 
-      const { data, error } = await supabase
-        .from("business_customers")
-        .select("*")
-        .eq("user_id", user!.id)
-        .order("created_at", { ascending: false });
+      const [customerResult, taskResult, pendingResult] =
+        await Promise.all([
+          supabase
+            .from("business_customers")
+            .select("*")
+            .eq("user_id", user!.id)
+            .order("created_at", { ascending: false }),
+
+          supabase
+            .from("business_tasks")
+            .select("*", { count: "exact", head: true })
+            .eq("user_id", user!.id),
+
+          supabase
+            .from("business_tasks")
+            .select("*", { count: "exact", head: true })
+            .eq("user_id", user!.id)
+            .eq("status", "pending"),
+        ]);
 
       if (cancelled) return;
 
-      if (error) {
-        setCustomerError("Müşteriler yüklenemedi: " + error.message);
+      if (customerResult.error) {
+        setCustomerError(
+          "Müşteriler yüklenemedi: " +
+            customerResult.error.message
+        );
       } else {
-        setCustomers((data ?? []) as Customer[]);
+        setCustomers(
+          (customerResult.data ?? []) as Customer[]
+        );
       }
+
+      setTaskCount(
+        taskResult.error ? null : taskResult.count ?? 0
+      );
+
+      setPendingTaskCount(
+        pendingResult.error ? null : pendingResult.count ?? 0
+      );
 
       setCustomersLoading(false);
     }
 
-    void loadCustomers();
+    void loadData();
 
     return () => {
       cancelled = true;
@@ -280,17 +305,14 @@ export default function BusinessDashboardPage() {
   }
 
   function openTab(tab: MenuId) {
+    if (tab === "tasks") {
+      router.push("/business/tasks");
+      return;
+    }
+
     setActiveTab(tab);
     setSidebarOpen(false);
     setSearch("");
-  }
-
-  function toggleTask(index: number) {
-    setCompletedTasks((current) =>
-      current.includes(index)
-        ? current.filter((item) => item !== index)
-        : [...current, index]
-    );
   }
 
   function openNewCustomer() {
@@ -322,7 +344,7 @@ export default function BusinessDashboardPage() {
   }
 
   async function saveCustomer(
-    event: React.FormEvent<HTMLFormElement>
+    event: FormEvent<HTMLFormElement>
   ) {
     event.preventDefault();
 
@@ -330,13 +352,10 @@ export default function BusinessDashboardPage() {
 
     const name = customerForm.name.trim();
 
-    if (!name) {
-      setCustomerError("Müşteri adı zorunludur.");
-      return;
-    }
-
-    if (name.length > 150) {
-      setCustomerError("Müşteri adı çok uzun.");
+    if (!name || name.length > 150) {
+      setCustomerError(
+        "Müşteri adı 1-150 karakter olmalıdır."
+      );
       return;
     }
 
@@ -435,7 +454,7 @@ export default function BusinessDashboardPage() {
   }
 
   async function handleAiSubmit(
-    event: React.FormEvent<HTMLFormElement>
+    event: FormEvent<HTMLFormElement>
   ) {
     event.preventDefault();
 
@@ -502,9 +521,6 @@ export default function BusinessDashboardPage() {
       setAiLoading(false);
     }
   }
-
-  const inputClass =
-    "w-full rounded-xl border border-white/10 bg-[#0D0A17] px-4 py-3 text-sm text-white outline-none focus:border-purple-500";
 
   if (accessStatus === "checking") {
     return (
@@ -646,6 +662,12 @@ export default function BusinessDashboardPage() {
                 >
                   <Icon size={19} />
                   {item.label}
+                  {item.id === "tasks" && (
+                    <ArrowRight
+                      size={15}
+                      className="ml-auto"
+                    />
+                  )}
                 </button>
               );
             })}
@@ -759,12 +781,13 @@ export default function BusinessDashboardPage() {
                     detail: "Aktif müşteri sayısı",
                   },
                   {
-                    title: "Aktif Görevler",
-                    value: String(
-                      demoTasks.length - completedTasks.length
-                    ),
+                    title: "Bekleyen Görevler",
+                    value:
+                      pendingTaskCount === null
+                        ? "—"
+                        : String(pendingTaskCount),
                     icon: ListTodo,
-                    detail: "Demo görevler",
+                    detail: "Gerçek görev kayıtları",
                   },
                   {
                     title: "Aylık Gelir",
@@ -844,31 +867,28 @@ export default function BusinessDashboardPage() {
                 </section>
 
                 <section className="rounded-2xl border border-purple-500/20 bg-gradient-to-br from-purple-900/40 to-[#151020] p-6">
-                  <Bot
+                  <ListTodo
                     size={35}
                     className="mb-5 text-purple-300"
                   />
 
                   <h3 className="text-2xl font-bold">
-                    Hagy AI Asistan
+                    Görev Yönetimi
                   </h3>
 
                   <p className="mt-3 text-sm leading-7 text-gray-400">
-                    Satış, pazarlama ve işletme yönetimi
-                    konusunda yapay zekâ desteği.
+                    Toplam {taskCount ?? "—"} görev.
+                    Bekleyen görev sayısı:{" "}
+                    {pendingTaskCount ?? "—"}.
                   </p>
 
-                  <p className="mt-2 text-xs text-amber-300">
-                    Gerçek AI yanıtları için API kredisi gerekir.
-                  </p>
-
-                  <button
-                    type="button"
-                    onClick={() => openTab("assistant")}
-                    className="mt-6 rounded-xl bg-purple-600 px-5 py-3"
+                  <Link
+                    href="/business/tasks"
+                    className="mt-6 inline-flex items-center gap-2 rounded-xl bg-purple-600 px-5 py-3"
                   >
-                    Asistanı Aç
-                  </button>
+                    Görevleri Yönet
+                    <ArrowRight size={17} />
+                  </Link>
                 </section>
               </div>
             </div>
@@ -1149,43 +1169,6 @@ export default function BusinessDashboardPage() {
                   </div>
                 </form>
               </div>
-            </section>
-          )}
-
-          {activeTab === "tasks" && (
-            <section className="space-y-5">
-              <h1 className="text-2xl font-bold">
-                Görev Yönetimi
-              </h1>
-
-              <p className="text-sm text-amber-300">
-                Bu bölüm henüz demo modunda.
-              </p>
-
-              {demoTasks.map((task, index) => (
-                <button
-                  type="button"
-                  key={index}
-                  onClick={() => toggleTask(index)}
-                  className="flex w-full items-center gap-4 rounded-xl border border-white/10 bg-white/5 p-5 text-left"
-                >
-                  {completedTasks.includes(index) ? (
-                    <CheckCircle2 className="text-emerald-400" />
-                  ) : (
-                    <Circle className="text-gray-500" />
-                  )}
-
-                  <span
-                    className={
-                      completedTasks.includes(index)
-                        ? "text-gray-500 line-through"
-                        : ""
-                    }
-                  >
-                    {task}
-                  </span>
-                </button>
-              ))}
             </section>
           )}
 
