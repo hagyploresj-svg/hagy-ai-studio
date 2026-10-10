@@ -7,7 +7,9 @@ import {
   useState,
   type FormEvent,
 } from "react";
+
 import { useSearchParams } from "next/navigation";
+
 import {
   Upload,
   Loader2,
@@ -21,16 +23,19 @@ import {
   Megaphone,
   ArrowLeft,
 } from "lucide-react";
+
 import {
   templates,
   studios,
   type Studio,
 } from "@/lib/data";
+
 import { useI18n } from "@/lib/i18n";
 
 type Status = "idle" | "rendering" | "done" | "error";
 
 const MAX_FILE_SIZE = 3 * 1024 * 1024;
+
 const VIDEO_DURATIONS = [3, 5] as const;
 
 const studioIcons = {
@@ -40,19 +45,9 @@ const studioIcons = {
   advertisement: Megaphone,
 };
 
-const studioPrompts: Record<Studio, string> = {
-  character:
-    "The character walks slowly toward the camera with natural body movement. Preserve the original face and outfit. Smooth cinematic camera tracking, realistic motion, dramatic lighting, no sudden cuts.",
-
-  cinematic:
-    "Create a dramatic cinematic scene with slow camera movement, atmospheric smoke, beautiful lighting, subtle wind and realistic motion. Preserve the original subjects and composition. No sudden cuts.",
-
-  gift:
-    "Create a spectacular celebratory animation with glowing particles, golden sparks, magical light and elegant camera movement. Preserve the original subject and appearance. Smooth realistic motion, no sudden cuts.",
-
-  advertisement:
-    "Create a premium cinematic advertisement. Keep the original product or subject consistent. Smooth camera movement, elegant studio lighting, subtle reflections and professional commercial atmosphere. No sudden cuts.",
-};
+function normalizeDuration(seconds: number): number {
+  return seconds === 3 ? 3 : 5;
+}
 
 function Creator() {
   const { t, lang } = useI18n();
@@ -67,16 +62,17 @@ function Creator() {
   );
 
   const [tplId, setTplId] = useState(
-    requestedTemplate?.id ?? templates[0].id
+    requestedTemplate?.id ?? templates[0]?.id ?? ""
   );
 
   const [file, setFile] = useState<File | null>(null);
-  const [seconds, setSeconds] = useState(3);
+
+  const [seconds, setSeconds] = useState(
+    normalizeDuration(requestedTemplate?.seconds ?? 3)
+  );
 
   const [prompt, setPrompt] = useState(
-    requestedTemplate
-      ? studioPrompts[requestedTemplate.studio]
-      : ""
+    requestedTemplate?.prompt ?? ""
   );
 
   const [status, setStatus] = useState<Status>("idle");
@@ -93,19 +89,41 @@ function Creator() {
     (item) => item.id === studio
   );
 
+  const activeTemplate = templates.find(
+    (item) => item.id === tplId
+  );
+
   function chooseStudio(id: Studio) {
     const firstTemplate = templates.find(
       (item) => item.studio === id
     );
 
     setStudio(id);
-    setTplId(firstTemplate?.id ?? templates[0].id);
-    setPrompt(studioPrompts[id]);
+    setTplId(firstTemplate?.id ?? "");
+    setPrompt(firstTemplate?.prompt ?? "");
+    setSeconds(
+      normalizeDuration(firstTemplate?.seconds ?? 3)
+    );
+
     setFile(null);
-    setSeconds(3);
     setVideoUrl("");
     setError("");
     setStatus("idle");
+  }
+
+  function chooseTemplate(id: string) {
+    const selectedTemplate = templates.find(
+      (item) => item.id === id && item.studio === studio
+    );
+
+    if (!selectedTemplate) return;
+
+    setTplId(selectedTemplate.id);
+    setPrompt(selectedTemplate.prompt);
+    setSeconds(
+      normalizeDuration(selectedTemplate.seconds)
+    );
+    setError("");
   }
 
   function reset() {
@@ -138,7 +156,10 @@ function Creator() {
       return;
     }
 
-    if (file.size === 0 || file.size > MAX_FILE_SIZE) {
+    if (
+      file.size === 0 ||
+      file.size > MAX_FILE_SIZE
+    ) {
       setError("Fotoğraf en fazla 3 MB olabilir.");
       return;
     }
@@ -172,7 +193,11 @@ function Creator() {
 
       const data = await response.json();
 
-      if (!response.ok || !data.success || !data.videoUrl) {
+      if (
+        !response.ok ||
+        !data.success ||
+        !data.videoUrl
+      ) {
         throw new Error(
           data.error || "AI video oluşturulamadı."
         );
@@ -263,8 +288,8 @@ function Creator() {
         </h2>
 
         <p className="mt-3 text-sm text-white/60">
-          Wan 2.2 görüntünü işliyor. Lütfen bu sekmeyi
-          açık tut.
+          Wan 2.2 görüntünü işliyor.
+          Lütfen bu sekmeyi açık tut.
         </p>
 
         <p className="mt-5 text-sm text-violet">
@@ -385,8 +410,7 @@ function Creator() {
       >
         <p className="rounded-lg border border-violet/40 bg-violet/10 p-3 text-xs text-white/80">
           Gerçek AI video motoru: Wan 2.2 Lightning.
-          Fotoğrafını yükle, hareketleri tarif et ve
-          videonu oluştur.
+          Hazır şablon seç veya kendi promptunu yaz.
         </p>
 
         <div>
@@ -423,7 +447,10 @@ function Creator() {
         </div>
 
         <div>
-          <label className="label" htmlFor="ai-template">
+          <label
+            className="label"
+            htmlFor="ai-template"
+          >
             {t("cr.template")}
           </label>
 
@@ -431,23 +458,42 @@ function Creator() {
             id="ai-template"
             className="input"
             value={tplId}
-            onChange={(e) => setTplId(e.target.value)}
+            onChange={(e) =>
+              chooseTemplate(e.target.value)
+            }
           >
             {filteredTemplates.map((item) => (
-              <option key={item.id} value={item.id}>
+              <option
+                key={item.id}
+                value={item.id}
+              >
                 {item.name[lang]}
               </option>
             ))}
           </select>
 
-          <p className="mt-2 text-xs text-white/50">
-            Şablon seçimi şu an kategori amaçlıdır.
-            Videonun hareketlerini aşağıdaki prompt belirler.
-          </p>
+          {activeTemplate && (
+            <div className="mt-3 rounded-lg border border-white/10 bg-white/5 p-3">
+              <p className="text-sm font-semibold text-violet">
+                {activeTemplate.name[lang]}
+              </p>
+
+              <p className="mt-1 text-xs leading-5 text-white/60">
+                {activeTemplate.desc[lang]}
+              </p>
+
+              <p className="mt-2 text-xs text-green-400">
+                AI prompt otomatik yüklendi.
+              </p>
+            </div>
+          )}
         </div>
 
         <div>
-          <label className="label" htmlFor="ai-prompt">
+          <label
+            className="label"
+            htmlFor="ai-prompt"
+          >
             Video Prompt
           </label>
 
@@ -455,17 +501,31 @@ function Creator() {
             id="ai-prompt"
             className="input min-h-36 w-full resize-y"
             value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
+            onChange={(e) =>
+              setPrompt(e.target.value)
+            }
             placeholder="Describe the motion, lighting and camera movement..."
             maxLength={2000}
             required
           />
 
           <p className="mt-2 text-xs text-white/50">
-            Karakterin nasıl hareket edeceğini,
-            kamera açısını ve istediğin atmosferi yaz.
-            İngilizce prompt kullanabilirsin.
+            Şablonun hazır promptu otomatik gelir.
+            İstersen karakteri, hareketleri ve
+            atmosferi kendine göre değiştirebilirsin.
           </p>
+
+          {activeTemplate && (
+            <button
+              type="button"
+              onClick={() =>
+                setPrompt(activeTemplate.prompt)
+              }
+              className="mt-3 text-xs font-semibold text-violet hover:text-white"
+            >
+              Şablon Promptunu Geri Yükle
+            </button>
+          )}
         </div>
 
         <div>
@@ -478,7 +538,9 @@ function Creator() {
               <button
                 key={duration}
                 type="button"
-                onClick={() => setSeconds(duration)}
+                onClick={() =>
+                  setSeconds(duration)
+                }
                 className={`rounded-full border px-5 py-2 text-sm ${
                   seconds === duration
                     ? "border-violet bg-violet/20 text-white"
@@ -491,13 +553,16 @@ function Creator() {
           </div>
 
           <p className="mt-2 text-xs text-white/50">
-            3 ve 5 saniye test edildi. Daha uzun
-            süreler şimdilik devre dışı.
+            3 ve 5 saniyelik AI video üretimi.
+            Daha uzun süreler şimdilik devre dışı.
           </p>
         </div>
 
         {error && (
-          <p role="alert" className="text-sm text-pink">
+          <p
+            role="alert"
+            className="text-sm text-pink"
+          >
             {error}
           </p>
         )}
