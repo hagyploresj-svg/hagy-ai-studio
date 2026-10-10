@@ -6,7 +6,7 @@ import {
   useRef,
   useState,
   type ChangeEvent,
-  type PointerEvent,
+  type PointerEvent as ReactPointerEvent,
 } from "react";
 import Link from "next/link";
 import {
@@ -25,7 +25,6 @@ import {
   Type,
   Upload,
   GripVertical,
-  Captions,
 } from "lucide-react";
 import MemeSounds from "../MemeSounds";
 
@@ -64,26 +63,19 @@ type TextClip = {
   color: string;
 };
 
-type Tool =
-  | "media"
-  | "audio"
-  | "text"
-  | "effects"
-  | "settings";
+type Tool = "media" | "audio" | "text" | "effects" | "settings";
 
 const uid = () => crypto.randomUUID();
 
 const clamp = (n: number, min: number, max: number) =>
   Math.max(min, Math.min(max, n));
 
-function fmt(n: number) {
+const fmt = (n: number) => {
   const value = Math.floor(Math.max(0, n || 0));
-  return (
-    String(Math.floor(value / 60)).padStart(2, "0") +
-    ":" +
-    String(value % 60).padStart(2, "0")
-  );
-}
+  return `${String(Math.floor(value / 60)).padStart(2, "0")}:${String(
+    value % 60
+  ).padStart(2, "0")}`;
+};
 
 const menu = [
   { id: "media", label: "Medya", icon: Film },
@@ -103,6 +95,15 @@ const effects = [
   ["Soğuk", "hue-rotate(35deg)"],
 ];
 
+const buttonClass =
+  "rounded-xl bg-white/10 px-3 py-2 text-sm hover:bg-white/15 disabled:opacity-40";
+
+const primaryClass =
+  "rounded-xl bg-violet-600 px-4 py-3 text-sm font-semibold hover:bg-violet-500 disabled:opacity-40";
+
+const panelClass =
+  "rounded-xl border border-white/10 bg-white/5 p-3";
+
 export default function WorkspacePage() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const videoInput = useRef<HTMLInputElement>(null);
@@ -111,32 +112,29 @@ export default function WorkspacePage() {
   const timelineRef = useRef<HTMLDivElement>(null);
 
   const urlsRef = useRef<string[]>([]);
-  const playersRef = useRef<Map<string, HTMLAudioElement>>(
-    new Map()
-  );
-
+  const playersRef = useRef<Map<string, HTMLAudioElement>>(new Map());
   const textDragging = useRef(false);
-  const timelineDragging = useRef<{
+
+  const dragRef = useRef<{
     id: string;
     kind: "audio" | "text";
     startX: number;
     originalStart: number;
   } | null>(null);
 
+  const clipDragRef = useRef<number | null>(null);
+
   const [tool, setTool] = useState<Tool>("media");
   const [videoUrl, setVideoUrl] = useState("");
   const [videoName, setVideoName] = useState("");
   const [duration, setDuration] = useState(0);
-
   const [segments, setSegments] = useState<Segment[]>([]);
   const [time, setTime] = useState(0);
   const [playing, setPlaying] = useState(false);
 
   const [audioClips, setAudioClips] = useState<AudioClip[]>([]);
   const [textClips, setTextClips] = useState<TextClip[]>([]);
-  const [selectedText, setSelectedText] = useState<string | null>(
-    null
-  );
+  const [selectedText, setSelectedText] = useState<string | null>(null);
 
   const [filter, setFilter] = useState("none");
   const [volume, setVolume] = useState(100);
@@ -145,47 +143,25 @@ export default function WorkspacePage() {
   const [ratio, setRatio] = useState("9:16");
   const [quality, setQuality] = useState(720);
   const [fps, setFps] = useState(30);
-  const [fit, setFit] = useState<"contain" | "cover">(
-    "contain"
-  );
+  const [fit, setFit] = useState<"contain" | "cover">("contain");
 
   const [exporting, setExporting] = useState(false);
   const [progress, setProgress] = useState(0);
   const [message, setMessage] = useState("");
 
   const total = segments.reduce(
-    (sum, segment) =>
-      sum + segment.end - segment.start,
+    (sum, s) => sum + s.end - s.start,
     0
   );
 
-  const currentText = textClips.find(
-    (clip) =>
-      time >= clip.start &&
-      time < clip.start + clip.duration
+  const visibleTexts = textClips.filter(
+    (clip) => time >= clip.start && time < clip.start + clip.duration
   );
-
-  const editingText = textClips.find(
-    (clip) => clip.id === selectedText
-  );
-
-  const buttonClass =
-    "rounded-xl bg-white/10 px-3 py-2 text-sm hover:bg-white/15";
-
-  const primaryClass =
-    "rounded-xl bg-violet-600 px-4 py-3 text-sm font-semibold hover:bg-violet-500 disabled:opacity-40";
-
-  const panelClass =
-    "rounded-xl border border-white/10 bg-white/5 p-3";
 
   useEffect(() => {
     return () => {
-      urlsRef.current.forEach((url) =>
-        URL.revokeObjectURL(url)
-      );
-      playersRef.current.forEach((audio) =>
-        audio.pause()
-      );
+      urlsRef.current.forEach((url) => URL.revokeObjectURL(url));
+      playersRef.current.forEach((audio) => audio.pause());
     };
   }, []);
 
@@ -195,7 +171,7 @@ export default function WorkspacePage() {
 
     video.volume = volume / 100;
     video.playbackRate = speed;
-  }, [volume, speed, videoUrl]);
+  }, [videoUrl, volume, speed]);
 
   useEffect(() => {
     for (const clip of audioClips) {
@@ -207,11 +183,8 @@ export default function WorkspacePage() {
       }
 
       const offset = time - clip.start;
-
       const active =
-        playing &&
-        offset >= 0 &&
-        offset < clip.duration;
+        playing && offset >= 0 && offset < clip.duration;
 
       if (!active) {
         audio.pause();
@@ -219,10 +192,11 @@ export default function WorkspacePage() {
       }
 
       audio.volume = clip.volume / 100;
+      audio.playbackRate = speed;
 
       if (
         audio.readyState >= 1 &&
-        Math.abs(audio.currentTime - offset) > 0.4
+        Math.abs(audio.currentTime - offset) > 0.35
       ) {
         try {
           audio.currentTime = offset;
@@ -233,7 +207,7 @@ export default function WorkspacePage() {
         audio.play().catch(() => {});
       }
     }
-  }, [time, playing, audioClips]);
+  }, [time, playing, audioClips, speed]);
 
   function sourceAt(projectTime: number) {
     let remaining = projectTime;
@@ -254,24 +228,18 @@ export default function WorkspacePage() {
   }
 
   function projectAt(index: number, sourceTime: number) {
-    const previous = segments
+    const before = segments
       .slice(0, index)
-      .reduce(
-        (sum, segment) =>
-          sum + segment.end - segment.start,
-        0
-      );
+      .reduce((sum, s) => sum + s.end - s.start, 0);
 
-    return previous + sourceTime - segments[index].start;
+    return before + sourceTime - segments[index].start;
   }
 
   function seek(value: number) {
     const video = videoRef.current;
-
     if (!video || !segments.length) return;
 
     const next = clamp(value, 0, total);
-
     video.currentTime = sourceAt(next);
     setTime(next);
   }
@@ -279,19 +247,14 @@ export default function WorkspacePage() {
   function uploadVideo(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
 
-    if (!file || !file.type.startsWith("video/")) {
-      return;
-    }
+    if (!file || !file.type.startsWith("video/")) return;
 
     videoRef.current?.pause();
+    playersRef.current.forEach((audio) => audio.pause());
+    playersRef.current.clear();
 
     const url = URL.createObjectURL(file);
     urlsRef.current.push(url);
-
-    playersRef.current.forEach((audio) =>
-      audio.pause()
-    );
-    playersRef.current.clear();
 
     setVideoUrl(url);
     setVideoName(file.name);
@@ -309,7 +272,6 @@ export default function WorkspacePage() {
 
   async function togglePlay() {
     const video = videoRef.current;
-
     if (!video || !segments.length) return;
 
     if (!video.paused) {
@@ -330,26 +292,19 @@ export default function WorkspacePage() {
 
   function onVideoTime() {
     const video = videoRef.current;
-
     if (!video || !segments.length) return;
 
-    const sourceTime = video.currentTime;
+    const current = video.currentTime;
 
     const index = segments.findIndex(
-      (segment) =>
-        sourceTime >= segment.start - 0.02 &&
-        sourceTime < segment.end - 0.025
+      (s) => current >= s.start - 0.02 && current < s.end - 0.025
     );
 
     if (index >= 0) {
       setTime(
         projectAt(
           index,
-          clamp(
-            sourceTime,
-            segments[index].start,
-            segments[index].end
-          )
+          clamp(current, segments[index].start, segments[index].end)
         )
       );
       return;
@@ -357,16 +312,13 @@ export default function WorkspacePage() {
 
     if (video.paused) return;
 
-    const next = segments.findIndex(
-      (segment) =>
-        segment.start > sourceTime + 0.02
+    const nextIndex = segments.findIndex(
+      (s) => s.start > current + 0.02
     );
 
-    if (next >= 0) {
-      video.currentTime = segments[next].start;
-      setTime(
-        projectAt(next, segments[next].start)
-      );
+    if (nextIndex >= 0) {
+      video.currentTime = segments[nextIndex].start;
+      setTime(projectAt(nextIndex, segments[nextIndex].start));
     } else {
       video.pause();
       setTime(total);
@@ -380,13 +332,10 @@ export default function WorkspacePage() {
 
     let remaining = time;
 
-    const index = segments.findIndex((segment) => {
-      const length = segment.end - segment.start;
+    const index = segments.findIndex((s) => {
+      const length = s.end - s.start;
 
-      if (
-        remaining > 0.05 &&
-        remaining < length - 0.05
-      ) {
+      if (remaining > 0.05 && remaining < length - 0.05) {
         return true;
       }
 
@@ -395,9 +344,7 @@ export default function WorkspacePage() {
     });
 
     if (index < 0) {
-      setMessage(
-        "Kesmek için klibin içinden bir saniye seç."
-      );
+      setMessage("Kesmek için klibin içinden bir saniye seç.");
       return;
     }
 
@@ -406,29 +353,18 @@ export default function WorkspacePage() {
 
     setSegments((old) => [
       ...old.slice(0, index),
-      {
-        id: uid(),
-        start: segment.start,
-        end: cut,
-      },
-      {
-        id: uid(),
-        start: cut,
-        end: segment.end,
-      },
+      { id: uid(), start: segment.start, end: cut },
+      { id: uid(), start: cut, end: segment.end },
       ...old.slice(index + 1),
     ]);
 
-    setMessage("Video kesildi.");
+    setMessage("Video kesildi. Klipleri sürükleyebilirsin.");
   }
 
   function removeSegment(id: string) {
-    const next = segments.filter(
-      (segment) => segment.id !== id
-    );
+    const next = segments.filter((s) => s.id !== id);
 
     videoRef.current?.pause();
-
     setSegments(next);
     setTime(0);
 
@@ -440,29 +376,42 @@ export default function WorkspacePage() {
   }
 
   function reorderSegments(from: number, to: number) {
-    if (from === to || from < 0 || to < 0) return;
+    if (
+      !Number.isInteger(from) ||
+      from < 0 ||
+      to < 0 ||
+      from >= segments.length ||
+      to >= segments.length ||
+      from === to
+    ) {
+      return;
+    }
 
     const next = [...segments];
     const [moved] = next.splice(from, 1);
     next.splice(to, 0, moved);
 
     videoRef.current?.pause();
-
     setSegments(next);
     setTime(0);
 
     if (videoRef.current) {
       videoRef.current.currentTime = next[0].start;
     }
-
-    setMessage("Klip sırası değiştirildi.");
   }
 
   function addSound(sound: Sound) {
-    if (!videoUrl || total <= 0) {
+    if (!total) {
       setMessage("Önce video yükle.");
       return;
     }
+
+    const available = Math.max(0.1, total - time);
+
+    const length =
+      Number.isFinite(sound.duration) && sound.duration > 0
+        ? sound.duration
+        : 5;
 
     setAudioClips((old) => [
       ...old,
@@ -470,29 +419,17 @@ export default function WorkspacePage() {
         id: uid(),
         name: sound.name,
         url: sound.url,
-        start: clamp(time, 0, total),
-        duration: Math.min(
-          Number.isFinite(sound.duration) &&
-            sound.duration > 0
-            ? sound.duration
-            : 5,
-          Math.max(0.1, total - time)
-        ),
+        start: time,
+        duration: Math.min(length, available),
         volume: 100,
       },
     ]);
 
-    setMessage(
-      `${sound.name} ses katmanına eklendi.`
-    );
+    setMessage(`${sound.name} zaman çizelgesine eklendi.`);
   }
 
   function uploadAudio(event: ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(
-      event.target.files || []
-    );
-
-    files.forEach((file) => {
+    Array.from(event.target.files || []).forEach((file) => {
       if (!file.type.startsWith("audio/")) return;
 
       const url = URL.createObjectURL(file);
@@ -515,26 +452,18 @@ export default function WorkspacePage() {
     event.target.value = "";
   }
 
-  function removeAudio(id: string) {
-    playersRef.current.get(id)?.pause();
-    playersRef.current.delete(id);
-
+  function updateAudio(id: string, changes: Partial<AudioClip>) {
     setAudioClips((old) =>
-      old.filter((clip) => clip.id !== id)
+      old.map((clip) =>
+        clip.id === id ? { ...clip, ...changes } : clip
+      )
     );
   }
 
-  function updateAudio(
-    id: string,
-    changes: Partial<AudioClip>
-  ) {
-    setAudioClips((old) =>
-      old.map((clip) =>
-        clip.id === id
-          ? { ...clip, ...changes }
-          : clip
-      )
-    );
+  function removeAudio(id: string) {
+    playersRef.current.get(id)?.pause();
+    playersRef.current.delete(id);
+    setAudioClips((old) => old.filter((clip) => clip.id !== id));
   }
 
   function addText() {
@@ -546,11 +475,8 @@ export default function WorkspacePage() {
     const clip: TextClip = {
       id: uid(),
       text: "Yeni Metin",
-      start: clamp(time, 0, total),
-      duration: Math.min(
-        3,
-        Math.max(0.1, total - time)
-      ),
+      start: time,
+      duration: Math.min(3, Math.max(0.1, total - time)),
       x: 50,
       y: 50,
       size: 36,
@@ -562,53 +488,38 @@ export default function WorkspacePage() {
     setTool("text");
   }
 
-  function updateText(
-    id: string,
-    changes: Partial<TextClip>
-  ) {
+  function updateText(id: string, changes: Partial<TextClip>) {
     setTextClips((old) =>
       old.map((clip) =>
-        clip.id === id
-          ? { ...clip, ...changes }
-          : clip
+        clip.id === id ? { ...clip, ...changes } : clip
       )
     );
   }
 
   function removeText(id: string) {
-    setTextClips((old) =>
-      old.filter((clip) => clip.id !== id)
-    );
+    setTextClips((old) => old.filter((clip) => clip.id !== id));
 
     if (selectedText === id) {
       setSelectedText(null);
     }
   }
 
-  function moveText(event: PointerEvent<HTMLDivElement>) {
-    if (
-      !textDragging.current ||
-      !previewRef.current ||
-      !currentText
-    ) {
-      return;
-    }
+  function movePreviewText(
+    event: ReactPointerEvent<HTMLDivElement>,
+    id: string
+  ) {
+    if (!textDragging.current || !previewRef.current) return;
 
-    const rect =
-      previewRef.current.getBoundingClientRect();
+    const rect = previewRef.current.getBoundingClientRect();
 
-    updateText(currentText.id, {
+    updateText(id, {
       x: clamp(
-        ((event.clientX - rect.left) /
-          rect.width) *
-          100,
+        ((event.clientX - rect.left) / rect.width) * 100,
         5,
         95
       ),
       y: clamp(
-        ((event.clientY - rect.top) /
-          rect.height) *
-          100,
+        ((event.clientY - rect.top) / rect.height) * 100,
         5,
         95
       ),
@@ -616,51 +527,36 @@ export default function WorkspacePage() {
   }
 
   function startTimelineDrag(
-    event: PointerEvent<HTMLDivElement>,
+    event: ReactPointerEvent<HTMLDivElement>,
     kind: "audio" | "text",
     id: string,
     start: number
   ) {
-    if (!timelineRef.current) return;
-
-    timelineDragging.current = {
-      kind,
+    dragRef.current = {
       id,
+      kind,
       startX: event.clientX,
       originalStart: start,
     };
 
-    event.currentTarget.setPointerCapture(
-      event.pointerId
-    );
+    event.currentTarget.setPointerCapture(event.pointerId);
   }
 
   function moveTimelineItem(
-    event: PointerEvent<HTMLDivElement>
+    event: ReactPointerEvent<HTMLDivElement>
   ) {
-    const drag = timelineDragging.current;
+    const drag = dragRef.current;
+    const timeline = timelineRef.current;
 
-    if (
-      !drag ||
-      !timelineRef.current ||
-      total <= 0
-    ) {
-      return;
-    }
+    if (!drag || !timeline || !total) return;
 
-    const rect =
-      timelineRef.current.getBoundingClientRect();
+    const rect = timeline.getBoundingClientRect();
 
     const delta =
-      ((event.clientX - drag.startX) /
-        rect.width) *
-      total;
+      ((event.clientX - drag.startX) / rect.width) * total;
 
     if (drag.kind === "audio") {
-      const clip = audioClips.find(
-        (item) => item.id === drag.id
-      );
-
+      const clip = audioClips.find((c) => c.id === drag.id);
       if (!clip) return;
 
       updateAudio(drag.id, {
@@ -671,10 +567,7 @@ export default function WorkspacePage() {
         ),
       });
     } else {
-      const clip = textClips.find(
-        (item) => item.id === drag.id
-      );
-
+      const clip = textClips.find((c) => c.id === drag.id);
       if (!clip) return;
 
       updateText(drag.id, {
@@ -688,43 +581,29 @@ export default function WorkspacePage() {
   }
 
   function stopTimelineDrag() {
-    timelineDragging.current = null;
+    dragRef.current = null;
   }
 
-  function outputSize() {
+  function outputSize(): [number, number] {
     if (ratio === "9:16") {
-      return quality === 1080
-        ? [1080, 1920]
-        : [720, 1280];
+      return quality === 1080 ? [1080, 1920] : [720, 1280];
     }
 
     if (ratio === "1:1") {
-      return quality === 1080
-        ? [1080, 1080]
-        : [720, 720];
+      return quality === 1080 ? [1080, 1080] : [720, 720];
     }
 
-    return quality === 1080
-      ? [1920, 1080]
-      : [1280, 720];
+    return quality === 1080 ? [1920, 1080] : [1280, 720];
   }
 
   async function exportVideo() {
-    if (
-      !videoUrl ||
-      !segments.length ||
-      exporting
-    ) {
-      return;
-    }
+    if (!videoUrl || !segments.length || exporting) return;
 
     if (
       typeof MediaRecorder === "undefined" ||
       !HTMLCanvasElement.prototype.captureStream
     ) {
-      setMessage(
-        "Bu tarayıcı dışa aktarmayı desteklemiyor."
-      );
+      setMessage("Bu tarayıcı dışa aktarmayı desteklemiyor.");
       return;
     }
 
@@ -770,7 +649,7 @@ export default function WorkspacePage() {
 
         source.onloadedmetadata = () => resolve();
         source.onerror = () =>
-          reject(new Error("Video açılamadı."));
+          reject(new Error("Kaynak video açılamadı."));
       });
 
       audioContext = new AudioContext();
@@ -778,19 +657,18 @@ export default function WorkspacePage() {
       const destination =
         audioContext.createMediaStreamDestination();
 
-      const videoSource =
+      const sourceNode =
         audioContext.createMediaElementSource(source);
 
-      const videoGain = audioContext.createGain();
-      videoGain.gain.value = volume / 100;
+      const sourceGain = audioContext.createGain();
+      sourceGain.gain.value = volume / 100;
 
-      videoSource.connect(videoGain);
-      videoGain.connect(destination);
+      sourceNode.connect(sourceGain);
+      sourceGain.connect(destination);
 
       for (const clip of audioClips) {
         const audio = new Audio(clip.url);
         audio.preload = "auto";
-        audio.crossOrigin = "anonymous";
 
         const node =
           audioContext.createMediaElementSource(audio);
@@ -822,9 +700,7 @@ export default function WorkspacePage() {
       );
 
       if (!mime) {
-        throw new Error(
-          "Desteklenen video formatı bulunamadı."
-        );
+        throw new Error("Desteklenen video formatı bulunamadı.");
       }
 
       recorder = new MediaRecorder(combined, {
@@ -841,8 +717,10 @@ export default function WorkspacePage() {
         }
       };
 
-      const finished = new Promise<void>((resolve) => {
+      const finished = new Promise<void>((resolve, reject) => {
         recorder!.onstop = () => resolve();
+        recorder!.onerror = () =>
+          reject(new Error("Video kaydı başarısız."));
       });
 
       let outputTime = 0;
@@ -850,13 +728,8 @@ export default function WorkspacePage() {
       function drawFrame() {
         if (!ctx) return;
 
-        ctx.fillStyle = "#000000";
-        ctx.fillRect(
-          0,
-          0,
-          canvas.width,
-          canvas.height
-        );
+        ctx.fillStyle = "#000";
+        ctx.fillRect(0, 0, width, height);
 
         if (source.readyState >= 2) {
           const vw = source.videoWidth || width;
@@ -884,23 +757,23 @@ export default function WorkspacePage() {
           ctx.restore();
         }
 
-        const visibleTexts = textClips.filter(
+        const texts = textClips.filter(
           (clip) =>
             outputTime >= clip.start &&
             outputTime < clip.start + clip.duration
         );
 
-        for (const clip of visibleTexts) {
+        for (const clip of texts) {
           ctx.save();
 
-          ctx.fillStyle = clip.color;
           ctx.font = `bold ${Math.round(
             (clip.size * width) / 720
           )}px Arial`;
 
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";
-          ctx.shadowColor = "#000000";
+          ctx.fillStyle = clip.color;
+          ctx.shadowColor = "#000";
           ctx.shadowBlur = 8;
 
           ctx.fillText(
@@ -927,34 +800,30 @@ export default function WorkspacePage() {
       for (const segment of segments) {
         source.pause();
 
-        await new Promise<void>((resolve, reject) => {
-          const timer = window.setTimeout(
-            () =>
-              reject(
-                new Error(
-                  "Video konumu ayarlanamadı."
-                )
-              ),
-            15000
-          );
+        if (Math.abs(source.currentTime - segment.start) > 0.01) {
+          await new Promise<void>((resolve, reject) => {
+            const timer = window.setTimeout(
+              () => reject(new Error("Video konumu ayarlanamadı.")),
+              15000
+            );
 
-          source.addEventListener(
-            "seeked",
-            () => {
-              clearTimeout(timer);
-              resolve();
-            },
-            { once: true }
-          );
+            source.addEventListener(
+              "seeked",
+              () => {
+                clearTimeout(timer);
+                resolve();
+              },
+              { once: true }
+            );
 
-          source.currentTime = segment.start;
-        });
+            source.currentTime = segment.start;
+          });
+        }
 
         await source.play();
 
         const started = performance.now();
-        const length =
-          (segment.end - segment.start) / speed;
+        const length = (segment.end - segment.start) / speed;
 
         await new Promise<void>((resolve) => {
           const timer = window.setInterval(() => {
@@ -969,8 +838,7 @@ export default function WorkspacePage() {
               );
 
             for (const item of exportAudios) {
-              const offset =
-                outputTime - item.clip.start;
+              const offset = outputTime - item.clip.start;
 
               if (
                 offset >= 0 &&
@@ -982,6 +850,7 @@ export default function WorkspacePage() {
                 ) {
                   try {
                     item.audio.currentTime = offset;
+                    item.audio.playbackRate = speed;
                     item.audio.play().catch(() => {});
                   } catch {}
                 }
@@ -994,24 +863,17 @@ export default function WorkspacePage() {
               Math.min(
                 100,
                 Math.round(
-                  ((completed + elapsed) /
-                    totalExport) *
-                    100
+                  ((completed + elapsed) / totalExport) * 100
                 )
               )
             );
 
-            if (
-              elapsed >= length ||
-              source.ended
-            ) {
+            if (elapsed >= length || source.ended) {
               clearInterval(timer);
               source.pause();
-
               exportAudios.forEach((item) =>
                 item.audio.pause()
               );
-
               resolve();
             }
           }, 50);
@@ -1023,12 +885,10 @@ export default function WorkspacePage() {
       recorder.stop();
       await finished;
 
-      const blob = new Blob(chunks, {
-        type: mime,
-      });
+      const blob = new Blob(chunks, { type: mime });
 
       if (!blob.size) {
-        throw new Error("Video boş oluşturuldu.");
+        throw new Error("Boş video oluşturuldu.");
       }
 
       const url = URL.createObjectURL(blob);
@@ -1038,19 +898,13 @@ export default function WorkspacePage() {
       link.download = `hagy-${ratio.replace(
         ":",
         "x"
-      )}-${Date.now()}.${
-        mime.includes("mp4") ? "mp4" : "webm"
-      }`;
+      )}-${Date.now()}.${mime.includes("mp4") ? "mp4" : "webm"}`;
 
       document.body.appendChild(link);
       link.click();
       link.remove();
 
-      setTimeout(
-        () => URL.revokeObjectURL(url),
-        60000
-      );
-
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
       setMessage("Video dışa aktarıldı.");
     } catch (error) {
       setMessage(
@@ -1059,26 +913,17 @@ export default function WorkspacePage() {
           : "Dışa aktarma hatası."
       );
     } finally {
-      if (
-        recorder &&
-        recorder.state !== "inactive"
-      ) {
+      if (recorder && recorder.state === "recording") {
         recorder.stop();
       }
 
       cancelAnimationFrame(frame);
       source.pause();
 
-      exportAudios.forEach((item) =>
-        item.audio.pause()
-      );
-
-      stream
-        ?.getTracks()
-        .forEach((track) => track.stop());
+      exportAudios.forEach((item) => item.audio.pause());
+      stream?.getTracks().forEach((track) => track.stop());
 
       await audioContext?.close().catch(() => {});
-
       setExporting(false);
       setProgress(0);
     }
@@ -1105,14 +950,9 @@ export default function WorkspacePage() {
         <div className="flex gap-2">
           <button
             className={buttonClass}
-            onClick={() =>
-              videoInput.current?.click()
-            }
+            onClick={() => videoInput.current?.click()}
           >
-            <Upload
-              size={16}
-              className="mr-2 inline"
-            />
+            <Upload size={16} className="mr-2 inline" />
             Video Yükle
           </button>
 
@@ -1121,13 +961,8 @@ export default function WorkspacePage() {
             disabled={!segments.length || exporting}
             onClick={exportVideo}
           >
-            <Download
-              size={16}
-              className="mr-2 inline"
-            />
-            {exporting
-              ? `%${progress}`
-              : "Dışa Aktar"}
+            <Download size={16} className="mr-2 inline" />
+            {exporting ? `%${progress}` : "Dışa Aktar"}
           </button>
         </div>
       </header>
@@ -1180,29 +1015,20 @@ export default function WorkspacePage() {
         <aside className="w-full space-y-4 border-b border-white/10 bg-[#171a28] p-4 lg:w-80 lg:border-r">
           {tool === "media" && (
             <>
-              <h2 className="font-bold">
-                Medya Kütüphanesi
-              </h2>
+              <h2 className="font-bold">Medya Kütüphanesi</h2>
 
               <button
                 className={`${primaryClass} w-full`}
-                onClick={() =>
-                  videoInput.current?.click()
-                }
+                onClick={() => videoInput.current?.click()}
               >
-                <Upload
-                  size={17}
-                  className="mr-2 inline"
-                />
+                <Upload size={17} className="mr-2 inline" />
                 Video Seç
               </button>
 
               {videoName && (
                 <div className={panelClass}>
                   <Film className="mb-2 text-violet-400" />
-                  <p className="break-all text-sm">
-                    {videoName}
-                  </p>
+                  <p className="break-all text-sm">{videoName}</p>
                   <p className="text-xs text-white/50">
                     {fmt(duration)}
                   </p>
@@ -1213,20 +1039,13 @@ export default function WorkspacePage() {
 
           {tool === "audio" && (
             <>
-              <h2 className="font-bold">
-                Ses Kütüphanesi
-              </h2>
+              <h2 className="font-bold">Ses Kütüphanesi</h2>
 
               <button
                 className={`${buttonClass} w-full`}
-                onClick={() =>
-                  audioInput.current?.click()
-                }
+                onClick={() => audioInput.current?.click()}
               >
-                <Plus
-                  size={16}
-                  className="mr-2 inline"
-                />
+                <Plus size={16} className="mr-2 inline" />
                 Kendi Sesini Ekle
               </button>
 
@@ -1234,22 +1053,17 @@ export default function WorkspacePage() {
                 <h3 className="mb-3 font-semibold">
                   Global Meme Sounds
                 </h3>
-
                 <MemeSounds onAdd={addSound} />
               </div>
 
-              <h3 className="font-semibold">
-                Eklenen Sesler
-              </h3>
+              <h3 className="font-semibold">Eklenen Sesler</h3>
 
               {audioClips.map((clip) => (
                 <div
                   key={clip.id}
                   className={`${panelClass} space-y-3`}
                 >
-                  <p className="break-all text-sm">
-                    {clip.name}
-                  </p>
+                  <p className="break-all text-sm">{clip.name}</p>
 
                   <label className="block text-xs">
                     Başlangıç (saniye)
@@ -1258,17 +1072,15 @@ export default function WorkspacePage() {
                   <input
                     type="number"
                     min={0}
-                    max={total}
+                    max={Math.max(0, total - clip.duration)}
                     step={0.1}
-                    value={Number(
-                      clip.start.toFixed(2)
-                    )}
+                    value={Number(clip.start.toFixed(2))}
                     onChange={(event) =>
                       updateAudio(clip.id, {
                         start: clamp(
                           Number(event.target.value),
                           0,
-                          total
+                          Math.max(0, total - clip.duration)
                         ),
                       })
                     }
@@ -1276,23 +1088,21 @@ export default function WorkspacePage() {
                   />
 
                   <label className="block text-xs">
-                    Ses Süresi (saniye)
+                    Süre (saniye)
                   </label>
 
                   <input
                     type="number"
                     min={0.1}
-                    max={total}
+                    max={Math.max(0.1, total - clip.start)}
                     step={0.1}
-                    value={Number(
-                      clip.duration.toFixed(2)
-                    )}
+                    value={Number(clip.duration.toFixed(2))}
                     onChange={(event) =>
                       updateAudio(clip.id, {
                         duration: clamp(
                           Number(event.target.value),
                           0.1,
-                          total
+                          Math.max(0.1, total - clip.start)
                         ),
                       })
                     }
@@ -1310,18 +1120,14 @@ export default function WorkspacePage() {
                     value={clip.volume}
                     onChange={(event) =>
                       updateAudio(clip.id, {
-                        volume: Number(
-                          event.target.value
-                        ),
+                        volume: Number(event.target.value),
                       })
                     }
                     className="w-full accent-emerald-500"
                   />
 
                   <button
-                    onClick={() =>
-                      removeAudio(clip.id)
-                    }
+                    onClick={() => removeAudio(clip.id)}
                     className="flex items-center gap-2 text-xs text-red-300"
                   >
                     <Trash2 size={14} />
@@ -1334,25 +1140,19 @@ export default function WorkspacePage() {
 
           {tool === "text" && (
             <>
-              <h2 className="font-bold">
-                Metin Düzenleyici
-              </h2>
+              <h2 className="font-bold">Metin Düzenleyici</h2>
 
               <button
                 onClick={addText}
                 className={`${primaryClass} w-full`}
               >
-                <Plus
-                  size={16}
-                  className="mr-2 inline"
-                />
+                <Plus size={16} className="mr-2 inline" />
                 Yeni Metin Ekle
               </button>
 
               <p className="text-xs leading-5 text-white/50">
-                Her metni farklı bir saniyeye ekleyebilir,
-                süresini ayarlayabilir ve video üzerinde
-                istediğin yere taşıyabilirsin.
+                Metni videonun istediğin saniyesine ekle.
+                Önizlemede tutup sürükleyerek konumunu değiştir.
               </p>
 
               {textClips.map((clip, index) => (
@@ -1393,17 +1193,13 @@ export default function WorkspacePage() {
                         min={0}
                         max={total}
                         step={0.1}
-                        value={Number(
-                          clip.start.toFixed(2)
-                        )}
+                        value={Number(clip.start.toFixed(2))}
                         onChange={(event) =>
                           updateText(clip.id, {
                             start: clamp(
-                              Number(
-                                event.target.value
-                              ),
+                              Number(event.target.value),
                               0,
-                              total
+                              Math.max(0, total - clip.duration)
                             ),
                           })
                         }
@@ -1418,17 +1214,13 @@ export default function WorkspacePage() {
                         min={0.1}
                         max={total}
                         step={0.1}
-                        value={Number(
-                          clip.duration.toFixed(2)
-                        )}
+                        value={Number(clip.duration.toFixed(2))}
                         onChange={(event) =>
                           updateText(clip.id, {
                             duration: clamp(
-                              Number(
-                                event.target.value
-                              ),
+                              Number(event.target.value),
                               0.1,
-                              total
+                              Math.max(0.1, total - clip.start)
                             ),
                           })
                         }
@@ -1448,9 +1240,7 @@ export default function WorkspacePage() {
                     value={clip.size}
                     onChange={(event) =>
                       updateText(clip.id, {
-                        size: Number(
-                          event.target.value
-                        ),
+                        size: Number(event.target.value),
                       })
                     }
                     className="w-full accent-violet-500"
@@ -1481,9 +1271,7 @@ export default function WorkspacePage() {
                         onChange={(event) =>
                           updateText(clip.id, {
                             x: clamp(
-                              Number(
-                                event.target.value
-                              ),
+                              Number(event.target.value),
                               5,
                               95
                             ),
@@ -1503,9 +1291,7 @@ export default function WorkspacePage() {
                         onChange={(event) =>
                           updateText(clip.id, {
                             y: clamp(
-                              Number(
-                                event.target.value
-                              ),
+                              Number(event.target.value),
                               5,
                               95
                             ),
@@ -1518,21 +1304,16 @@ export default function WorkspacePage() {
 
                   <div className="flex gap-2">
                     <button
-                      onClick={() => {
-                        updateText(clip.id, {
-                          x: 50,
-                          y: 50,
-                        });
-                      }}
+                      onClick={() =>
+                        updateText(clip.id, { x: 50, y: 50 })
+                      }
                       className={buttonClass}
                     >
                       Ortala
                     </button>
 
                     <button
-                      onClick={() =>
-                        removeText(clip.id)
-                      }
+                      onClick={() => removeText(clip.id)}
                       className="flex items-center gap-1 rounded-lg bg-red-600/20 px-3 py-2 text-xs text-red-300"
                     >
                       <Trash2 size={14} />
@@ -1546,20 +1327,14 @@ export default function WorkspacePage() {
 
           {tool === "effects" && (
             <>
-              <h2 className="font-bold">
-                Görsel Efektler
-              </h2>
+              <h2 className="font-bold">Görsel Efektler</h2>
 
               {effects.map(([name, value]) => (
                 <button
                   key={name}
-                  onClick={() =>
-                    setFilter(value)
-                  }
+                  onClick={() => setFilter(value)}
                   className={`block w-full text-left ${panelClass} ${
-                    filter === value
-                      ? "border-violet-400"
-                      : ""
+                    filter === value ? "border-violet-400" : ""
                   }`}
                 >
                   {name}
@@ -1570,9 +1345,7 @@ export default function WorkspacePage() {
 
           {tool === "settings" && (
             <>
-              <h2 className="font-bold">
-                Video Ayarları
-              </h2>
+              <h2 className="font-bold">Video Ayarları</h2>
 
               <label className="block text-sm">
                 Video Sesi: %{volume}
@@ -1584,9 +1357,7 @@ export default function WorkspacePage() {
                 max={100}
                 value={volume}
                 onChange={(event) =>
-                  setVolume(
-                    Number(event.target.value)
-                  )
+                  setVolume(Number(event.target.value))
                 }
                 className="w-full accent-violet-500"
               />
@@ -1598,27 +1369,18 @@ export default function WorkspacePage() {
               <select
                 value={speed}
                 onChange={(event) =>
-                  setSpeed(
-                    Number(event.target.value)
-                  )
+                  setSpeed(Number(event.target.value))
                 }
                 className={`${panelClass} w-full`}
               >
-                {[0.5, 0.75, 1, 1.25, 1.5, 2].map(
-                  (value) => (
-                    <option
-                      key={value}
-                      value={value}
-                    >
-                      {value}x
-                    </option>
-                  )
-                )}
+                {[0.5, 0.75, 1, 1.25, 1.5, 2].map((value) => (
+                  <option key={value} value={value}>
+                    {value}x
+                  </option>
+                ))}
               </select>
 
-              <h3 className="font-semibold">
-                Dışa Aktarma
-              </h3>
+              <h3 className="font-semibold">Dışa Aktarma</h3>
 
               <label className="block text-sm">
                 Video Oranı
@@ -1626,9 +1388,7 @@ export default function WorkspacePage() {
 
               <select
                 value={ratio}
-                onChange={(event) =>
-                  setRatio(event.target.value)
-                }
+                onChange={(event) => setRatio(event.target.value)}
                 className={`${panelClass} w-full`}
               >
                 <option value="9:16">
@@ -1649,9 +1409,7 @@ export default function WorkspacePage() {
               <select
                 value={quality}
                 onChange={(event) =>
-                  setQuality(
-                    Number(event.target.value)
-                  )
+                  setQuality(Number(event.target.value))
                 }
                 className={`${panelClass} w-full`}
               >
@@ -1659,16 +1417,12 @@ export default function WorkspacePage() {
                 <option value={1080}>1080p</option>
               </select>
 
-              <label className="block text-sm">
-                FPS
-              </label>
+              <label className="block text-sm">FPS</label>
 
               <select
                 value={fps}
                 onChange={(event) =>
-                  setFps(
-                    Number(event.target.value)
-                  )
+                  setFps(Number(event.target.value))
                 }
                 className={`${panelClass} w-full`}
               >
@@ -1685,9 +1439,7 @@ export default function WorkspacePage() {
                 value={fit}
                 onChange={(event) =>
                   setFit(
-                    event.target.value as
-                      | "contain"
-                      | "cover"
+                    event.target.value as "contain" | "cover"
                   )
                 }
                 className={`${panelClass} w-full`}
@@ -1709,10 +1461,7 @@ export default function WorkspacePage() {
               ref={previewRef}
               className="relative flex max-h-[65vh] w-full max-w-4xl items-center justify-center overflow-hidden rounded-xl bg-black"
               style={{
-                aspectRatio: ratio.replace(
-                  ":",
-                  "/"
-                ),
+                aspectRatio: ratio.replace(":", "/"),
               }}
             >
               <video
@@ -1721,55 +1470,36 @@ export default function WorkspacePage() {
                 playsInline
                 preload="metadata"
                 className="h-full w-full"
-                style={{
-                  filter,
-                  objectFit: fit,
-                }}
+                style={{ filter, objectFit: fit }}
                 onLoadedMetadata={(event) => {
-                  const value =
-                    event.currentTarget.duration;
+                  const value = event.currentTarget.duration;
 
-                  if (
-                    Number.isFinite(value) &&
-                    value > 0
-                  ) {
+                  if (Number.isFinite(value) && value > 0) {
                     setDuration(value);
                     setSegments([
-                      {
-                        id: uid(),
-                        start: 0,
-                        end: value,
-                      },
+                      { id: uid(), start: 0, end: value },
                     ]);
                   }
                 }}
                 onTimeUpdate={onVideoTime}
-                onPlay={() =>
-                  setPlaying(true)
-                }
-                onPause={() =>
-                  setPlaying(false)
-                }
-                onEnded={() =>
-                  setPlaying(false)
-                }
+                onPlay={() => setPlaying(true)}
+                onPause={() => setPlaying(false)}
+                onEnded={() => setPlaying(false)}
               />
 
-              {currentText && (
+              {visibleTexts.map((clip) => (
                 <div
+                  key={clip.id}
                   onPointerDown={(event) => {
                     textDragging.current = true;
-
+                    setSelectedText(clip.id);
                     event.currentTarget.setPointerCapture(
                       event.pointerId
                     );
-
-                    setSelectedText(
-                      currentText.id
-                    );
-                    moveText(event);
                   }}
-                  onPointerMove={moveText}
+                  onPointerMove={(event) =>
+                    movePreviewText(event, clip.id)
+                  }
                   onPointerUp={() => {
                     textDragging.current = false;
                   }}
@@ -1778,48 +1508,33 @@ export default function WorkspacePage() {
                   }}
                   className="absolute z-10 cursor-move select-none rounded-lg border border-dashed border-white/50 bg-black/10 px-3 py-2"
                   style={{
-                    left: `${currentText.x}%`,
-                    top: `${currentText.y}%`,
-                    transform:
-                      "translate(-50%, -50%)",
+                    left: `${clip.x}%`,
+                    top: `${clip.y}%`,
+                    transform: "translate(-50%, -50%)",
                     touchAction: "none",
                   }}
                 >
                   <p
                     className="max-w-[70vw] break-words text-center font-bold"
                     style={{
-                      fontSize:
-                        currentText.size,
-                      color:
-                        currentText.color,
-                      textShadow:
-                        "0 2px 8px black",
+                      fontSize: clip.size,
+                      color: clip.color,
+                      textShadow: "0 2px 8px black",
                     }}
                   >
-                    {currentText.text}
+                    {clip.text}
                   </p>
                 </div>
-              )}
+              ))}
             </div>
           ) : (
             <button
-              onClick={() =>
-                videoInput.current?.click()
-              }
+              onClick={() => videoInput.current?.click()}
               className="flex min-h-72 w-full max-w-2xl flex-col items-center justify-center gap-4 rounded-2xl border-2 border-dashed border-white/20 bg-[#171a28]"
             >
-              <Upload
-                size={36}
-                className="text-violet-400"
-              />
-
-              <span className="font-bold">
-                Videonu Yükle
-              </span>
-
-              <span className={primaryClass}>
-                Video Seç
-              </span>
+              <Upload size={36} className="text-violet-400" />
+              <span className="font-bold">Videonu Yükle</span>
+              <span className={primaryClass}>Video Seç</span>
             </button>
           )}
 
@@ -1827,35 +1542,24 @@ export default function WorkspacePage() {
             <div className="flex items-center gap-5">
               <button
                 className={buttonClass}
-                disabled={!videoUrl}
-                onClick={() =>
-                  seek(time - 5)
-                }
+                disabled={!segments.length}
+                onClick={() => seek(time - 5)}
               >
                 -5 sn
               </button>
 
               <button
                 onClick={togglePlay}
-                disabled={
-                  !segments.length ||
-                  exporting
-                }
+                disabled={!segments.length || exporting}
                 className="rounded-full bg-violet-600 p-4 disabled:opacity-40"
               >
-                {playing ? (
-                  <Pause />
-                ) : (
-                  <Play />
-                )}
+                {playing ? <Pause /> : <Play />}
               </button>
 
               <button
                 className={buttonClass}
-                disabled={!videoUrl}
-                onClick={() =>
-                  seek(time + 5)
-                }
+                disabled={!segments.length}
+                onClick={() => seek(time + 5)}
               >
                 +5 sn
               </button>
@@ -1863,10 +1567,7 @@ export default function WorkspacePage() {
 
             <button
               onClick={splitVideo}
-              disabled={
-                !segments.length ||
-                exporting
-              }
+              disabled={!segments.length || exporting}
               className="flex items-center gap-2 rounded-xl bg-violet-600/20 px-5 py-3 text-sm font-semibold text-violet-200 disabled:opacity-40"
             >
               <Scissors size={19} />
@@ -1880,26 +1581,26 @@ export default function WorkspacePage() {
         </section>
       </div>
 
-      <section className="space-y-4 border-t border-white/10 bg-[#141725] p-4">
-        <div className="flex items-center justify-between">
-          <h2 className="font-semibold">
-            Zaman Çizelgesi
-          </h2>
+      {/* BİRLEŞİK ZAMAN ÇİZELGESİ */}
+      <section className="space-y-3 border-t border-white/10 bg-[#141725] p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 className="font-semibold">
+              Birleşik Zaman Çizelgesi
+            </h2>
+            <p className="text-xs text-white/40">
+              Video, ses ve metin aynı zaman ölçeğinde
+            </p>
+          </div>
 
           <button
             className={buttonClass}
             disabled={!duration}
             onClick={() => {
               videoRef.current?.pause();
-
               setSegments([
-                {
-                  id: uid(),
-                  start: 0,
-                  end: duration,
-                },
+                { id: uid(), start: 0, end: duration },
               ]);
-
               setTime(0);
 
               if (videoRef.current) {
@@ -1911,6 +1612,7 @@ export default function WorkspacePage() {
           </button>
         </div>
 
+        {/* ORTAK ZAMAN SEÇİCİ */}
         <input
           type="range"
           min={0}
@@ -1919,230 +1621,212 @@ export default function WorkspacePage() {
           value={time}
           disabled={!segments.length}
           onChange={(event) =>
-            seek(
-              Number(event.target.value)
-            )
+            seek(Number(event.target.value))
           }
           className="w-full accent-violet-500"
         />
 
-        <div className="space-y-4">
-          <div>
-            <div className="mb-2 flex items-center gap-2 text-xs text-white/60">
-              <Film size={15} />
-              Video Klipleri
-            </div>
+        <div
+          ref={timelineRef}
+          className="relative overflow-hidden rounded-xl border border-white/10 bg-[#202438]"
+        >
+          {/* VIDEO: ÜST SATIR */}
+          <div className="relative h-20 border-b border-white/10">
+            {segments.map((segment, index) => {
+              const start = segments
+                .slice(0, index)
+                .reduce(
+                  (sum, s) => sum + s.end - s.start,
+                  0
+                );
 
-            <div className="flex gap-2 overflow-x-auto rounded-xl bg-[#222638] p-3">
-              {segments.map((segment, index) => (
+              const length = segment.end - segment.start;
+
+              return (
                 <div
                   key={segment.id}
                   draggable
                   onDragStart={(event) => {
+                    clipDragRef.current = index;
+                    event.dataTransfer.effectAllowed = "move";
                     event.dataTransfer.setData(
                       "text/plain",
                       String(index)
                     );
                   }}
-                  onDragOver={(event) =>
-                    event.preventDefault()
-                  }
+                  onDragOver={(event) => {
+                    event.preventDefault();
+                  }}
                   onDrop={(event) => {
                     event.preventDefault();
 
-                    const from = Number(
-                      event.dataTransfer.getData(
-                        "text/plain"
-                      )
-                    );
+                    if (clipDragRef.current !== null) {
+                      reorderSegments(
+                        clipDragRef.current,
+                        index
+                      );
+                    }
 
-                    reorderSegments(
-                      from,
-                      index
-                    );
+                    clipDragRef.current = null;
                   }}
-                  className="relative flex min-w-28 flex-col gap-2 rounded-lg border-2 border-blue-400 bg-blue-600/60 p-3"
+                  onDragEnd={() => {
+                    clipDragRef.current = null;
+                  }}
+                  className="absolute inset-y-0 flex flex-col justify-between overflow-hidden border-r-2 border-[#141725] bg-blue-600/80 p-2"
                   style={{
-                    flexGrow: Math.max(
-                      0.2,
-                      segment.end -
-                        segment.start
-                    ),
+                    left: `${
+                      total ? (start / total) * 100 : 0
+                    }%`,
+                    width: `${
+                      total ? (length / total) * 100 : 0
+                    }%`,
                   }}
                 >
                   <button
-                    onClick={() =>
-                      seek(
-                        projectAt(
-                          index,
-                          segment.start
-                        )
-                      )
-                    }
-                    className="flex items-center gap-1 text-left text-xs"
+                    onClick={() => seek(start)}
+                    className="flex items-center gap-1 truncate text-left text-xs font-medium"
                   >
-                    <GripVertical size={15} />
+                    <GripVertical
+                      size={14}
+                      className="shrink-0"
+                    />
                     Klip {index + 1}
                   </button>
 
-                  <span className="text-xs text-white/70">
-                    {fmt(
-                      segment.end -
-                        segment.start
-                    )}
+                  <span className="text-[10px] text-white/70">
+                    {fmt(length)}
                   </span>
 
                   <button
+                    title="Klibi Sil"
                     onClick={() =>
-                      removeSegment(
-                        segment.id
-                      )
+                      removeSegment(segment.id)
                     }
                     className="absolute right-1 top-1 rounded bg-red-600 p-1"
                   >
-                    <Trash2 size={13} />
+                    <Trash2 size={12} />
                   </button>
                 </div>
-              ))}
-            </div>
+              );
+            })}
           </div>
 
-          <div>
-            <div className="mb-2 flex items-center gap-2 text-xs text-emerald-300">
-              <Music2 size={15} />
-              Ses Katmanı — Sürükleyerek Taşı
-            </div>
+          {/* SES: VIDEONUN HEMEN ALTINDA */}
+          <div className="relative h-14 border-b border-white/10 bg-emerald-950/30">
+            {audioClips.map((clip) => (
+              <div
+                key={clip.id}
+                onPointerDown={(event) =>
+                  startTimelineDrag(
+                    event,
+                    "audio",
+                    clip.id,
+                    clip.start
+                  )
+                }
+                onPointerMove={moveTimelineItem}
+                onPointerUp={stopTimelineDrag}
+                onPointerCancel={stopTimelineDrag}
+                className="absolute inset-y-1 flex cursor-grab touch-none items-center gap-1 overflow-hidden rounded-md border border-emerald-300 bg-emerald-600/90 px-2 text-xs active:cursor-grabbing"
+                style={{
+                  left: `${
+                    total ? (clip.start / total) * 100 : 0
+                  }%`,
+                  width: `${
+                    total ? (clip.duration / total) * 100 : 0
+                  }%`,
+                }}
+                title={`${clip.name} - ${clip.start.toFixed(1)} sn`}
+              >
+                <Music2
+                  size={13}
+                  className="shrink-0"
+                />
+                <span className="truncate">
+                  {clip.name}
+                </span>
+              </div>
+            ))}
+          </div>
 
+          {/* METIN: SESİN HEMEN ALTINDA */}
+          <div className="relative h-12 bg-violet-950/30">
+            {textClips.map((clip) => (
+              <div
+                key={clip.id}
+                onPointerDown={(event) => {
+                  setSelectedText(clip.id);
+
+                  startTimelineDrag(
+                    event,
+                    "text",
+                    clip.id,
+                    clip.start
+                  );
+                }}
+                onPointerMove={moveTimelineItem}
+                onPointerUp={stopTimelineDrag}
+                onPointerCancel={stopTimelineDrag}
+                onDoubleClick={() => {
+                  setTool("text");
+                  seek(clip.start);
+                }}
+                className="absolute inset-y-1 flex cursor-grab touch-none items-center gap-1 overflow-hidden rounded-md border border-violet-300 bg-violet-600/90 px-2 text-xs active:cursor-grabbing"
+                style={{
+                  left: `${
+                    total ? (clip.start / total) * 100 : 0
+                  }%`,
+                  width: `${
+                    total ? (clip.duration / total) * 100 : 0
+                  }%`,
+                }}
+              >
+                <Type
+                  size={13}
+                  className="shrink-0"
+                />
+                <span className="truncate">
+                  {clip.text}
+                </span>
+              </div>
+            ))}
+          </div>
+
+          {/* ÜÇ KATMANIN ORTAK OYNATMA ÇİZGİSİ */}
+          {total > 0 && (
             <div
-              ref={timelineRef}
-              className="relative h-16 rounded-xl border border-emerald-500/20 bg-emerald-500/10"
+              className="pointer-events-none absolute bottom-0 top-0 z-20 w-[2px] bg-white"
+              style={{
+                left: `${(time / total) * 100}%`,
+              }}
             >
-              {audioClips.map((clip) => (
-                <div
-                  key={clip.id}
-                  onPointerDown={(event) =>
-                    startTimelineDrag(
-                      event,
-                      "audio",
-                      clip.id,
-                      clip.start
-                    )
-                  }
-                  onPointerMove={
-                    moveTimelineItem
-                  }
-                  onPointerUp={
-                    stopTimelineDrag
-                  }
-                  onPointerCancel={
-                    stopTimelineDrag
-                  }
-                  className="absolute inset-y-2 flex cursor-grab items-center gap-1 overflow-hidden rounded-lg border border-emerald-300 bg-emerald-600/80 px-2 text-xs active:cursor-grabbing"
-                  style={{
-                    left: `${
-                      total
-                        ? (clip.start /
-                            total) *
-                          100
-                        : 0
-                    }%`,
-                    width: `${
-                      total
-                        ? (clip.duration /
-                            total) *
-                          100
-                        : 0
-                    }%`,
-                    touchAction: "none",
-                  }}
-                >
-                  <Music2
-                    size={13}
-                    className="shrink-0"
-                  />
-                  <span className="truncate">
-                    {clip.name}
-                  </span>
-                </div>
-              ))}
+              <div className="absolute -left-[5px] top-0 h-3 w-3 rounded-b bg-white" />
             </div>
-          </div>
+          )}
+        </div>
 
-          <div>
-            <div className="mb-2 flex items-center gap-2 text-xs text-violet-300">
-              <Type size={15} />
-              Metin Katmanı — Sürükleyerek Taşı
-            </div>
+        <div className="flex flex-wrap gap-4 text-xs text-white/60">
+          <span className="flex items-center gap-2">
+            <span className="h-3 w-3 rounded bg-blue-600" />
+            Video
+          </span>
 
-            <div className="relative h-16 rounded-xl border border-violet-500/20 bg-violet-500/10">
-              {textClips.map((clip) => (
-                <div
-                  key={clip.id}
-                  onPointerDown={(event) => {
-                    setSelectedText(
-                      clip.id
-                    );
+          <span className="flex items-center gap-2">
+            <span className="h-3 w-3 rounded bg-emerald-600" />
+            Ses
+          </span>
 
-                    startTimelineDrag(
-                      event,
-                      "text",
-                      clip.id,
-                      clip.start
-                    );
-                  }}
-                  onPointerMove={
-                    moveTimelineItem
-                  }
-                  onPointerUp={
-                    stopTimelineDrag
-                  }
-                  onPointerCancel={
-                    stopTimelineDrag
-                  }
-                  onDoubleClick={() => {
-                    setTool("text");
-                    seek(clip.start);
-                  }}
-                  className="absolute inset-y-2 flex cursor-grab items-center gap-1 overflow-hidden rounded-lg border border-violet-300 bg-violet-600/80 px-2 text-xs active:cursor-grabbing"
-                  style={{
-                    left: `${
-                      total
-                        ? (clip.start /
-                            total) *
-                          100
-                        : 0
-                    }%`,
-                    width: `${
-                      total
-                        ? (clip.duration /
-                            total) *
-                          100
-                        : 0
-                    }%`,
-                    touchAction: "none",
-                  }}
-                >
-                  <Type
-                    size={13}
-                    className="shrink-0"
-                  />
-
-                  <span className="truncate">
-                    {clip.text}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
+          <span className="flex items-center gap-2">
+            <span className="h-3 w-3 rounded bg-violet-600" />
+            Metin
+          </span>
         </div>
 
         <p className="text-xs leading-5 text-white/40">
-          Mavi: Video klipleri. Yeşil: Sesler.
-          Mor: Metinler. Ses ve metin kutularını
-          sağa sola sürükleyerek başlangıç
-          zamanlarını değiştirebilirsin.
-          Metinlerin ekrandaki yerini de video
-          önizlemesinde sürükleyerek ayarlayabilirsin.
+          Sesleri ve metinleri sağa sola sürükleyerek
+          video kliplerinin içine veya birleşim noktalarına
+          yerleştirebilirsin. Video kliplerini de tutup
+          sürükleyerek yeniden sıralayabilirsin.
         </p>
       </section>
     </main>
