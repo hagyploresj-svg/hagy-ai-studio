@@ -2,24 +2,25 @@
 "use client";
 
 import {
+  useCallback,
   useEffect,
   useRef,
   useState,
   type ChangeEvent,
-  type PointerEvent,
 } from "react";
 
 import {
-  Upload,
-  Play,
-  Pause,
-  Volume2,
-  Plus,
-  Trash2,
   Clapperboard,
+  ExternalLink,
+  Loader2,
   Music2,
-  RotateCcw,
-  FileAudio,
+  Pause,
+  Play,
+  Plus,
+  Search,
+  Trash2,
+  Upload,
+  Volume2,
 } from "lucide-react";
 
 type Sound = {
@@ -27,99 +28,201 @@ type Sound = {
   name: string;
   url: string;
   duration: number;
+  source: string;
+  category: string;
 };
 
 type Clip = {
   id: string;
-  soundId: string;
+  sound: Sound;
   start: number;
   duration: number;
   volume: number;
 };
 
-function fmt(value: number) {
-  const seconds = Math.max(
-    0,
-    Number.isFinite(value) ? value : 0
-  );
+type ApiSound = {
+  slug?: string;
+  title?: string;
+  duration_ms?: number;
+  mp3_url?: string;
+  page_url?: string;
+  license?: string;
+};
 
-  return `${String(Math.floor(seconds / 60)).padStart(
+const categories = [
+  { label: "😂 Komik", query: "cartoon boing funny laugh" },
+  { label: "💨 Whoosh", query: "whoosh swoosh transition" },
+  { label: "💥 Patlama", query: "explosion impact punch" },
+  { label: "🎮 Oyun", query: "retro game coin win" },
+  { label: "🎁 Bildirim", query: "notification chime bell" },
+  { label: "⚡ Doğa", query: "thunder rain wind" },
+  { label: "🦁 Hayvan", query: "animal lion roar" },
+  { label: "✨ Büyü", query: "magic sparkle spell" },
+];
+
+function fmt(t: number) {
+  const value = Math.max(0, Number.isFinite(t) ? t : 0);
+  return `${String(Math.floor(value / 60)).padStart(
     2,
     "0"
-  )}:${String(Math.floor(seconds % 60)).padStart(2, "0")}`;
+  )}:${String(Math.floor(value % 60)).padStart(2, "0")}`;
+}
+
+function clamp(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, n));
 }
 
 export default function EditStudio() {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const videoUrlRef = useRef<string | null>(null);
-  const soundsRef = useRef<Sound[]>([]);
-  const clipsRef = useRef<Clip[]>([]);
-  const audioRef = useRef<Map<string, HTMLAudioElement>>(
+  const video = useRef<HTMLVideoElement>(null);
+  const videoObject = useRef<string | null>(null);
+  const localUrls = useRef<string[]>([]);
+  const active = useRef<Map<string, HTMLAudioElement>>(
     new Map()
   );
-
-  const dragRef = useRef<{
-    id: string;
-    x: number;
-    start: number;
-    width: number;
-  } | null>(null);
+  const clipsRef = useRef<Clip[]>([]);
+  const preview = useRef<HTMLAudioElement | null>(null);
+  const requestId = useRef(0);
 
   const [videoUrl, setVideoUrl] = useState("");
   const [videoName, setVideoName] = useState("");
   const [duration, setDuration] = useState(0);
-  const [currentTime, setCurrentTime] = useState(0);
+  const [time, setTime] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [sounds, setSounds] = useState<Sound[]>([]);
   const [clips, setClips] = useState<Clip[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(
+  const [selected, setSelected] = useState<string | null>(
     null
   );
+  const [category, setCategory] = useState(
+    categories[0].label
+  );
+  const [query, setQuery] = useState("");
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-
-  useEffect(() => {
-    soundsRef.current = sounds;
-  }, [sounds]);
+  const [previewId, setPreviewId] = useState<
+    string | null
+  >(null);
 
   useEffect(() => {
     clipsRef.current = clips;
   }, [clips]);
 
-  useEffect(() => {
-    const audioElements = audioRef.current;
+  const stopClips = useCallback(() => {
+    active.current.forEach((a) => {
+      a.pause();
+      a.src = "";
+    });
+    active.current.clear();
+  }, []);
 
+  const stopPreview = useCallback(() => {
+    preview.current?.pause();
+    preview.current = null;
+    setPreviewId(null);
+  }, []);
+
+  useEffect(() => {
     return () => {
-      if (videoUrlRef.current) {
-        URL.revokeObjectURL(videoUrlRef.current);
+      active.current.forEach((a) => a.pause());
+      preview.current?.pause();
+
+      if (videoObject.current) {
+        URL.revokeObjectURL(videoObject.current);
       }
 
-      soundsRef.current.forEach((sound) => {
-        URL.revokeObjectURL(sound.url);
-      });
-
-      audioElements.forEach((audio) => {
-        audio.pause();
-        audio.src = "";
-      });
-
-      audioElements.clear();
+      localUrls.current.forEach((url) =>
+        URL.revokeObjectURL(url)
+      );
     };
   }, []);
 
-  function stopAudio() {
-    audioRef.current.forEach((audio) => {
-      audio.pause();
-      audio.currentTime = 0;
-    });
+  const search = useCallback(
+    async (text: string, cat: string) => {
+      const id = ++requestId.current;
+      setLoading(true);
+      setError("");
 
-    audioRef.current.clear();
-  }
+      try {
+        const term =
+          text.trim() ||
+          categories.find((c) => c.label === cat)?.query ||
+          "funny";
 
-  function uploadVideo(
-    event: ChangeEvent<HTMLInputElement>
-  ) {
-    const file = event.target.files?.[0];
-    event.target.value = "";
+        const response = await fetch(
+          `https://sfxmint.com/api/v1/search?q=${encodeURIComponent(
+            term
+          )}&limit=30`,
+          { cache: "no-store" }
+        );
+
+        if (!response.ok) {
+          throw new Error(
+            `Ses servisi yanıt vermedi (${response.status}).`
+          );
+        }
+
+        const json: unknown = await response.json();
+
+        const list: ApiSound[] = Array.isArray(json)
+          ? json
+          : json &&
+            typeof json === "object" &&
+            "candidates" in json &&
+            Array.isArray(json.candidates)
+          ? (json.candidates as ApiSound[])
+          : [];
+
+        const found: Sound[] = list
+          .filter(
+            (item) =>
+              item.slug &&
+              item.mp3_url &&
+              (!item.license ||
+                item.license === "CC0" ||
+                item.license === "CC0-1.0")
+          )
+          .map((item) => ({
+            id: `remote-${item.slug}`,
+            name: item.title || item.slug || "Ses efekti",
+            url: item.mp3_url!,
+            duration: Math.max(
+              0.1,
+              (item.duration_ms || 1000) / 1000
+            ),
+            source:
+              item.page_url ||
+              `https://sfxmint.com/sounds/${item.slug}`,
+            category: cat,
+          }));
+
+        if (id === requestId.current) {
+          setSounds(found);
+        }
+      } catch (e) {
+        if (id === requestId.current) {
+          setSounds([]);
+          setError(
+            e instanceof Error
+              ? e.message
+              : "Sesler yüklenemedi."
+          );
+        }
+      } finally {
+        if (id === requestId.current) {
+          setLoading(false);
+        }
+      }
+    },
+    []
+  );
+
+  useEffect(() => {
+    void search("", categories[0].label);
+  }, [search]);
+
+  function uploadVideo(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
 
     if (!file) return;
 
@@ -131,34 +234,33 @@ export default function EditStudio() {
       return;
     }
 
-    videoRef.current?.pause();
-    stopAudio();
+    video.current?.pause();
+    stopClips();
 
-    if (videoUrlRef.current) {
-      URL.revokeObjectURL(videoUrlRef.current);
+    if (videoObject.current) {
+      URL.revokeObjectURL(videoObject.current);
     }
 
     const url = URL.createObjectURL(file);
-
-    videoUrlRef.current = url;
+    videoObject.current = url;
 
     setVideoUrl(url);
     setVideoName(file.name);
     setDuration(0);
-    setCurrentTime(0);
+    setTime(0);
     setPlaying(false);
     setClips([]);
-    setSelectedId(null);
+    setSelected(null);
     setError("");
   }
 
-  async function uploadSounds(
-    event: ChangeEvent<HTMLInputElement>
+  async function uploadSound(
+    e: ChangeEvent<HTMLInputElement>
   ) {
-    const files = Array.from(event.target.files || []);
-    event.target.value = "";
+    const files = Array.from(e.target.files || []);
+    e.target.value = "";
 
-    const accepted: Sound[] = [];
+    const added: Sound[] = [];
 
     for (const file of files) {
       if (
@@ -169,100 +271,73 @@ export default function EditStudio() {
       }
 
       const url = URL.createObjectURL(file);
+      localUrls.current.push(url);
 
-      try {
-        const length = await new Promise<number>(
-          (resolve, reject) => {
-            const probe = new Audio();
+      const len = await new Promise<number>((resolve) => {
+        const a = new Audio();
+        a.preload = "metadata";
 
-            probe.preload = "metadata";
+        a.onloadedmetadata = () =>
+          resolve(
+            Number.isFinite(a.duration) ? a.duration : 0
+          );
 
-            probe.onloadedmetadata = () =>
-              resolve(probe.duration);
+        a.onerror = () => resolve(0);
+        a.src = url;
+      });
 
-            probe.onerror = () =>
-              reject(new Error("Ses okunamadı"));
-
-            probe.src = url;
-          }
-        );
-
-        if (
-          !Number.isFinite(length) ||
-          length <= 0
-        ) {
-          throw new Error("Süre okunamadı");
-        }
-
-        accepted.push({
+      if (len > 0) {
+        added.push({
           id: crypto.randomUUID(),
           name: file.name,
           url,
-          duration: length,
+          duration: len,
+          source: "",
+          category: "Dosyalarım",
         });
-      } catch {
-        URL.revokeObjectURL(url);
       }
     }
 
-    if (accepted.length) {
-      setSounds((prev) => [...prev, ...accepted]);
-    }
-
-    setError(
-      accepted.length === files.length
-        ? ""
-        : "Bazı ses dosyaları okunamadı. MP3 veya WAV deneyebilirsin."
-    );
+    setSounds((prev) => [...added, ...prev]);
   }
 
-  function playSound(
-    sound: Sound,
-    volume = 0.7,
-    offset = 0,
-    clipId?: string
-  ) {
-    const audio = new Audio(sound.url);
-
-    audio.volume = Math.min(
-      1,
-      Math.max(0, volume)
-    );
-
-    audio.currentTime = Math.max(0, offset);
-
-    const id = clipId || crypto.randomUUID();
-
-    audioRef.current.get(id)?.pause();
-    audioRef.current.set(id, audio);
-
-    audio.onended = () => {
-      if (audioRef.current.get(id) === audio) {
-        audioRef.current.delete(id);
-      }
-    };
-
-    void audio.play().catch(() => {
-      setError(
-        "Ses oynatılamadı. Tarayıcının ses iznini kontrol et."
-      );
-    });
-  }
-
-  function addClip(sound: Sound) {
-    if (!videoUrl || duration <= 0) {
-      setError("Önce bir video yükle.");
+  function listen(sound: Sound) {
+    if (previewId === sound.id) {
+      stopPreview();
       return;
     }
 
-    const start = Math.min(
-      currentTime,
+    stopPreview();
+
+    const a = new Audio(sound.url);
+    preview.current = a;
+    setPreviewId(sound.id);
+
+    a.onended = stopPreview;
+
+    void a.play().catch(() => {
+      setError(
+        "Ses oynatılamadı. Kaynak bağlantısını kontrol et."
+      );
+      stopPreview();
+    });
+  }
+
+  function add(sound: Sound) {
+    if (!videoUrl || duration <= 0) {
+      setError("Önce video yükle.");
+      return;
+    }
+
+    const start = clamp(
+      time,
+      0,
       Math.max(0, duration - 0.1)
     );
 
     const clip: Clip = {
       id: crypto.randomUUID(),
-      soundId: sound.id,
+      sound,
       start,
       duration: Math.min(
         sound.duration,
@@ -272,215 +347,126 @@ export default function EditStudio() {
     };
 
     setClips((prev) => [...prev, clip]);
-    setSelectedId(clip.id);
+    setSelected(clip.id);
     setError("");
   }
 
-  function syncAudio(time: number) {
+  function sync(t: number) {
     for (const clip of clipsRef.current) {
-      const sound = soundsRef.current.find(
-        (item) => item.id === clip.soundId
-      );
+      const inRange =
+        t >= clip.start &&
+        t < clip.start + clip.duration;
 
-      if (!sound) continue;
+      const a = active.current.get(clip.id);
 
-      const active =
-        time >= clip.start &&
-        time < clip.start + clip.duration;
-
-      const existing = audioRef.current.get(clip.id);
-
-      if (!active) {
-        if (existing) {
-          existing.pause();
-          audioRef.current.delete(clip.id);
+      if (!inRange) {
+        if (a) {
+          a.pause();
+          active.current.delete(clip.id);
         }
-
         continue;
       }
 
-      if (!existing) {
-        playSound(
-          sound,
-          clip.volume / 100,
-          time - clip.start,
-          clip.id
+      if (!a) {
+        const sound = new Audio(clip.sound.url);
+        sound.volume = clip.volume / 100;
+        sound.currentTime = Math.max(
+          0,
+          t - clip.start
         );
-      } else {
-        existing.volume = clip.volume / 100;
 
-        const expected = time - clip.start;
+        active.current.set(clip.id, sound);
+
+        void sound.play().catch(() => {
+          active.current.delete(clip.id);
+          setError("Ses kaynağı çalınamadı.");
+        });
+      } else {
+        a.volume = clip.volume / 100;
+
+        const expected = t - clip.start;
 
         if (
-          Math.abs(
-            existing.currentTime - expected
-          ) > 0.4
+          Math.abs(a.currentTime - expected) > 0.45
         ) {
-          existing.currentTime = expected;
+          a.currentTime = expected;
         }
       }
     }
   }
 
-  function timeUpdate() {
-    const video = videoRef.current;
+  function seek(t: number) {
+    if (!video.current) return;
 
-    if (!video) return;
+    const next = clamp(t, 0, duration);
+    video.current.currentTime = next;
+    setTime(next);
+    stopClips();
 
-    const time = video.currentTime;
-
-    setCurrentTime(time);
-
-    if (!video.paused) {
-      syncAudio(time);
+    if (!video.current.paused) {
+      sync(next);
     }
   }
 
-  function seek(time: number) {
-    const video = videoRef.current;
+  async function toggle() {
+    const v = video.current;
+    if (!v) return;
 
-    if (!video) return;
-
-    const next = Math.max(
-      0,
-      Math.min(duration, time)
-    );
-
-    video.currentTime = next;
-    setCurrentTime(next);
-
-    stopAudio();
-
-    if (!video.paused) {
-      syncAudio(next);
-    }
-  }
-
-  async function togglePlay() {
-    const video = videoRef.current;
-
-    if (!video) return;
-
-    if (!video.paused) {
-      video.pause();
-      stopAudio();
+    if (!v.paused) {
+      v.pause();
+      stopClips();
       return;
     }
 
     try {
-      if (
-        duration > 0 &&
-        video.currentTime >= duration - 0.05
-      ) {
+      if (v.currentTime >= duration - 0.05) {
         seek(0);
       }
 
-      await video.play();
-      syncAudio(video.currentTime);
+      await v.play();
+      sync(v.currentTime);
     } catch {
-      setError(
-        "Video oynatılamadı. Dosya biçimini kontrol et."
-      );
+      setError("Video oynatılamadı.");
     }
   }
 
-  function updateClip(
-    id: string,
-    patch: Partial<Clip>
-  ) {
+  function update(id: string, patch: Partial<Clip>) {
     setClips((prev) =>
-      prev.map((clip) =>
-        clip.id === id
-          ? { ...clip, ...patch }
-          : clip
+      prev.map((c) =>
+        c.id === id ? { ...c, ...patch } : c
       )
     );
-
-    const audio = audioRef.current.get(id);
 
     if (
-      audio &&
-      patch.volume !== undefined
+      patch.start !== undefined ||
+      patch.duration !== undefined
     ) {
-      audio.volume = patch.volume / 100;
+      stopClips();
+    }
+
+    if (patch.volume !== undefined) {
+      const a = active.current.get(id);
+
+      if (a) {
+        a.volume = patch.volume / 100;
+      }
     }
   }
 
-  function removeClip(id: string) {
-    const audio = audioRef.current.get(id);
-
-    audio?.pause();
-    audioRef.current.delete(id);
+  function remove(id: string) {
+    active.current.get(id)?.pause();
+    active.current.delete(id);
 
     setClips((prev) =>
-      prev.filter((clip) => clip.id !== id)
+      prev.filter((c) => c.id !== id)
     );
 
-    if (selectedId === id) {
-      setSelectedId(null);
+    if (selected === id) {
+      setSelected(null);
     }
   }
 
-  function dragStart(
-    event: PointerEvent<HTMLButtonElement>,
-    clip: Clip
-  ) {
-    if (!duration) return;
-
-    const width =
-      event.currentTarget.parentElement
-        ?.getBoundingClientRect().width || 1;
-
-    dragRef.current = {
-      id: clip.id,
-      x: event.clientX,
-      start: clip.start,
-      width,
-    };
-
-    event.currentTarget.setPointerCapture(
-      event.pointerId
-    );
-
-    setSelectedId(clip.id);
-  }
-
-  function dragMove(
-    event: PointerEvent<HTMLButtonElement>
-  ) {
-    const drag = dragRef.current;
-
-    if (!drag || !duration) return;
-
-    const clip = clipsRef.current.find(
-      (item) => item.id === drag.id
-    );
-
-    if (!clip) return;
-
-    const next = Math.max(
-      0,
-      Math.min(
-        duration - clip.duration,
-        drag.start +
-          ((event.clientX - drag.x) /
-            drag.width) *
-            duration
-      )
-    );
-
-    updateClip(drag.id, {
-      start: Math.round(next * 10) / 10,
-    });
-  }
-
-  const selected = clips.find(
-    (clip) => clip.id === selectedId
-  );
-
-  const selectedSound = sounds.find(
-    (sound) => sound.id === selected?.soundId
-  );
+  const chosen = clips.find((c) => c.id === selected);
 
   return (
     <main className="mx-auto max-w-7xl px-4 py-10">
@@ -493,83 +479,151 @@ export default function EditStudio() {
           <h1 className="text-3xl font-bold">
             HAGY Edit Studio
           </h1>
-
-          <p className="mt-1 text-sm text-white/50">
-            Video & Sound Effects Editor 2.0
+          <p className="text-sm text-white/50">
+            Online Sound Library • Video Editor 3.0
           </p>
         </div>
       </div>
 
-      <div className="grid gap-5 lg:grid-cols-[300px_1fr]">
+      <div className="grid gap-5 lg:grid-cols-[340px_1fr]">
         <aside className="card p-5">
-          <h2 className="mb-2 flex items-center gap-2 font-bold">
-            <Music2
-              className="text-violet"
-              size={20}
-            />
-            Ses Kütüphanem
+          <h2 className="mb-3 flex items-center gap-2 font-bold">
+            <Music2 size={20} className="text-violet" />
+            Hazır Ses Efektleri
           </h2>
 
-          <p className="mb-4 text-xs leading-5 text-white/50">
-            Kendi MP3, WAV, OGG veya M4A
-            seslerini yükle. Sesler sadece
-            bu tarayıcı oturumunda tutulur.
+          <p className="mb-3 text-xs text-white/50">
+            İndirme gerekmez. Sesler çevrimiçi oynatılır.
           </p>
 
-          <label className="btn-primary flex cursor-pointer items-center justify-center gap-2 text-center">
-            <FileAudio size={18} />
-            Ses Dosyası Yükle
+          <form
+            className="mb-3 flex gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void search(query, category);
+            }}
+          >
+            <input
+              aria-label="Ses ara"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Boing, laugh, meme, punch..."
+              className="min-w-0 flex-1 rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm outline-none focus:border-violet"
+            />
+
+            <button
+              type="submit"
+              className="rounded-lg bg-violet px-3"
+              aria-label="Ara"
+            >
+              <Search size={18} />
+            </button>
+          </form>
+
+          <div className="mb-4 flex flex-wrap gap-2">
+            {categories.map((c) => (
+              <button
+                type="button"
+                key={c.label}
+                onClick={() => {
+                  setCategory(c.label);
+                  setQuery("");
+                  void search("", c.label);
+                }}
+                className={`rounded-full border px-3 py-1.5 text-xs ${
+                  category === c.label
+                    ? "border-violet bg-violet/20"
+                    : "border-white/10 bg-white/5"
+                }`}
+              >
+                {c.label}
+              </button>
+            ))}
+          </div>
+
+          <label className="mb-4 flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed border-white/20 p-3 text-sm hover:border-violet">
+            <Upload size={16} />
+            Kendi MP3/WAV dosyanı ekle
 
             <input
               type="file"
-              multiple
               accept="audio/*,.mp3,.wav,.ogg,.m4a"
-              onChange={uploadSounds}
+              multiple
+              onChange={uploadSound}
               className="hidden"
             />
           </label>
 
-          <div className="mt-5 space-y-2">
-            {sounds.length === 0 && (
-              <p className="rounded-xl border border-dashed border-white/15 p-4 text-center text-sm text-white/40">
-                Henüz ses eklenmedi.
-              </p>
-            )}
+          {loading && (
+            <p className="flex items-center gap-2 text-sm text-white/60">
+              <Loader2
+                size={16}
+                className="animate-spin"
+              />
+              Sesler aranıyor...
+            </p>
+          )}
 
+          {!loading && sounds.length === 0 && (
+            <p className="py-6 text-center text-sm text-white/50">
+              Bu aramada ses bulunamadı.
+            </p>
+          )}
+
+          <div className="max-h-[540px] space-y-2 overflow-y-auto pr-1">
             {sounds.map((sound) => (
               <div
                 key={sound.id}
                 className="rounded-xl border border-white/10 bg-white/5 p-3"
               >
-                <p
-                  className="truncate text-sm font-medium"
-                  title={sound.name}
-                >
-                  {sound.name}
-                </p>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p
+                      className="truncate text-sm font-medium"
+                      title={sound.name}
+                    >
+                      {sound.name}
+                    </p>
 
-                <p className="mt-1 text-xs text-white/40">
-                  {fmt(sound.duration)} sn
-                </p>
+                    <p className="text-xs text-white/40">
+                      {sound.duration.toFixed(1)} sn
+                    </p>
+                  </div>
+
+                  {sound.source && (
+                    <a
+                      href={sound.source}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-label="Ses kaynağı"
+                      title="Kaynak"
+                      className="text-white/50 hover:text-white"
+                    >
+                      <ExternalLink size={15} />
+                    </a>
+                  )}
+                </div>
 
                 <div className="mt-3 flex gap-2">
                   <button
                     type="button"
+                    onClick={() => listen(sound)}
                     className="btn-ghost flex flex-1 items-center justify-center gap-1 text-xs"
-                    onClick={() =>
-                      playSound(sound)
-                    }
                   >
-                    <Play size={14} />
-                    Dinle
+                    {previewId === sound.id ? (
+                      <Pause size={14} />
+                    ) : (
+                      <Play size={14} />
+                    )}
+                    {previewId === sound.id
+                      ? "Durdur"
+                      : "Dinle"}
                   </button>
 
                   <button
                     type="button"
+                    onClick={() => add(sound)}
                     className="btn-primary flex flex-1 items-center justify-center gap-1 text-xs"
-                    onClick={() =>
-                      addClip(sound)
-                    }
                   >
                     <Plus size={14} />
                     Ekle
@@ -579,12 +633,10 @@ export default function EditStudio() {
             ))}
           </div>
 
-          <div className="mt-5 rounded-xl border border-violet/20 bg-violet/10 p-4 text-xs leading-5 text-white/60">
-            Aslan, gök gürültüsü, whoosh
-            veya hediye seslerini kendi
-            dosyalarınla ekleyebilirsin.
-            Hazır efekt paketi henüz eklenmedi.
-          </div>
+          <p className="mt-4 text-xs leading-5 text-white/40">
+            Çevrimiçi sesler üçüncü taraf servisten
+            alınır. Bağlantı ve servis erişimi gerekir.
+          </p>
         </aside>
 
         <section className="space-y-5">
@@ -601,8 +653,7 @@ export default function EditStudio() {
                 </h2>
 
                 <p className="text-sm text-white/50">
-                  MP4, WebM veya tarayıcının
-                  desteklediği MOV
+                  MP4, WebM veya desteklenen MOV
                 </p>
 
                 <span className="btn-primary">
@@ -618,7 +669,7 @@ export default function EditStudio() {
               </label>
             ) : (
               <>
-                <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center justify-between gap-2">
                   <p className="truncate text-sm text-white/70">
                     {videoName}
                   </p>
@@ -628,7 +679,7 @@ export default function EditStudio() {
 
                     <input
                       type="file"
-                      accept="video/mp4,video/webm,video/quicktime"
+                      accept="video/*"
                       onChange={uploadVideo}
                       className="hidden"
                     />
@@ -637,51 +688,52 @@ export default function EditStudio() {
 
                 <div className="mt-4 flex min-h-64 items-center justify-center rounded-xl bg-black">
                   <video
-                    ref={videoRef}
+                    ref={video}
                     src={videoUrl}
                     playsInline
                     preload="metadata"
                     className="max-h-[480px] w-full rounded-xl object-contain"
-                    onLoadedMetadata={(event) => {
-                      const value =
-                        event.currentTarget.duration;
+                    onLoadedMetadata={(e) => {
+                      const d = e.currentTarget.duration;
 
-                      if (
-                        Number.isFinite(value) &&
-                        value > 0
-                      ) {
-                        setDuration(value);
+                      if (Number.isFinite(d) && d > 0) {
+                        setDuration(d);
                       } else {
-                        setError(
-                          "Video süresi okunamadı."
-                        );
+                        setError("Video süresi okunamadı.");
                       }
                     }}
-                    onTimeUpdate={timeUpdate}
-                    onPlay={() =>
-                      setPlaying(true)
-                    }
+                    onTimeUpdate={() => {
+                      if (!video.current) return;
+
+                      const current =
+                        video.current.currentTime;
+
+                      setTime(current);
+
+                      if (!video.current.paused) {
+                        sync(current);
+                      }
+                    }}
+                    onPlay={() => setPlaying(true)}
                     onPause={() => {
                       setPlaying(false);
-                      stopAudio();
+                      stopClips();
                     }}
                     onEnded={() => {
                       setPlaying(false);
-                      stopAudio();
+                      stopClips();
                     }}
                     onError={() =>
-                      setError(
-                        "Video açılamadı. Farklı bir MP4 veya WebM dene."
-                      )
+                      setError("Video açılamadı.")
                     }
                   />
                 </div>
 
-                <div className="mt-5 flex items-center gap-4">
+                <div className="mt-5 flex items-center gap-3">
                   <button
                     type="button"
-                    onClick={togglePlay}
-                    className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-violet text-white"
+                    onClick={toggle}
+                    className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-violet"
                   >
                     {playing ? (
                       <Pause size={20} />
@@ -695,20 +747,15 @@ export default function EditStudio() {
                     min={0}
                     max={duration || 1}
                     step={0.01}
-                    value={currentTime}
-                    onChange={(event) =>
-                      seek(
-                        Number(
-                          event.target.value
-                        )
-                      )
+                    value={time}
+                    onChange={(e) =>
+                      seek(Number(e.target.value))
                     }
                     className="min-w-0 flex-1 accent-violet"
                   />
 
                   <span className="shrink-0 text-xs text-white/60">
-                    {fmt(currentTime)} /{" "}
-                    {fmt(duration)}
+                    {fmt(time)} / {fmt(duration)}
                   </span>
                 </div>
               </>
@@ -716,7 +763,7 @@ export default function EditStudio() {
           </div>
 
           <div className="card p-5">
-            <div className="mb-5 flex items-center justify-between gap-3">
+            <div className="mb-5 flex items-center justify-between">
               <h2 className="flex items-center gap-2 font-bold">
                 <Volume2
                   size={20}
@@ -726,7 +773,7 @@ export default function EditStudio() {
               </h2>
 
               <span className="text-xs text-white/50">
-                {clips.length} ses klibi
+                {clips.length} efekt
               </span>
             </div>
 
@@ -735,32 +782,26 @@ export default function EditStudio() {
                 Önce video yükle.
               </p>
             ) : (
-              <div className="space-y-4">
-                <div className="flex justify-between text-xs text-white/40">
+              <>
+                <div className="mb-2 flex justify-between text-xs text-white/40">
                   <span>00:00</span>
-                  <span>
-                    {fmt(duration / 2)}
-                  </span>
-                  <span>
-                    {fmt(duration)}
-                  </span>
+                  <span>{fmt(duration / 2)}</span>
+                  <span>{fmt(duration)}</span>
                 </div>
 
                 <div
-                  className="relative h-12 cursor-pointer overflow-hidden rounded-lg bg-violet/30"
-                  onClick={(event) => {
-                    const rect =
-                      event.currentTarget.getBoundingClientRect();
+                  className="relative mb-3 h-12 cursor-pointer overflow-hidden rounded-lg bg-violet/30"
+                  onClick={(e) => {
+                    const r =
+                      e.currentTarget.getBoundingClientRect();
 
                     seek(
-                      ((event.clientX -
-                        rect.left) /
-                        rect.width) *
+                      ((e.clientX - r.left) / r.width) *
                         duration
                     );
                   }}
                 >
-                  <div className="flex h-full items-center px-4 text-xs font-medium">
+                  <div className="flex h-full items-center px-4 text-xs">
                     🎬 {videoName}
                   </div>
 
@@ -769,232 +810,143 @@ export default function EditStudio() {
                     style={{
                       left: `${
                         duration
-                          ? (currentTime /
-                              duration) *
-                            100
+                          ? (time / duration) * 100
                           : 0
                       }%`,
                     }}
                   />
                 </div>
 
-                <div className="relative min-h-24 rounded-lg border border-white/10 bg-white/5">
-                  {clips.map(
-                    (clip, index) => (
-                      <button
-                        key={clip.id}
-                        type="button"
-                        onPointerDown={(
-                          event
-                        ) =>
-                          dragStart(
-                            event,
-                            clip
-                          )
-                        }
-                        onPointerMove={
-                          dragMove
-                        }
-                        onPointerUp={() => {
-                          dragRef.current =
-                            null;
-                        }}
-                        onPointerCancel={() => {
-                          dragRef.current =
-                            null;
-                        }}
-                        onClick={() =>
-                          setSelectedId(
-                            clip.id
-                          )
-                        }
-                        className={`absolute flex h-9 touch-none items-center overflow-hidden rounded-lg border px-2 text-left text-xs ${
-                          selectedId ===
-                          clip.id
-                            ? "border-white bg-violet"
-                            : "border-emerald-400/40 bg-emerald-600/70"
-                        }`}
-                        style={{
-                          top: `${
-                            8 +
-                            (index % 2) *
-                              42
-                          }px`,
-                          left: `${
-                            duration
-                              ? (clip.start /
-                                  duration) *
-                                100
-                              : 0
-                          }%`,
-                          width: `${
-                            duration
-                              ? (clip.duration /
-                                  duration) *
-                                100
-                              : 0
-                          }%`,
-                          minWidth:
-                            "20px",
-                        }}
-                        title="Sürükleyerek zamanını değiştir"
-                      >
-                        <span className="truncate">
-                          🔊{" "}
-                          {sounds.find(
-                            (sound) =>
-                              sound.id ===
-                              clip.soundId
-                          )?.name ||
-                            "Ses"}
-                        </span>
-                      </button>
-                    )
-                  )}
+                <div
+                  className="relative overflow-hidden rounded-lg border border-white/10 bg-white/5"
+                  style={{
+                    minHeight: Math.max(
+                      112,
+                      clips.length * 40 + 12
+                    ),
+                  }}
+                >
+                  {clips.map((clip, i) => (
+                    <button
+                      key={clip.id}
+                      type="button"
+                      onClick={() =>
+                        setSelected(clip.id)
+                      }
+                      className={`absolute flex h-9 items-center overflow-hidden rounded-lg border px-2 text-left text-xs ${
+                        selected === clip.id
+                          ? "border-white bg-violet"
+                          : "border-emerald-400/40 bg-emerald-600/70"
+                      }`}
+                      style={{
+                        top: `${8 + i * 40}px`,
+                        left: `${
+                          duration
+                            ? (clip.start / duration) * 100
+                            : 0
+                        }%`,
+                        width: `${
+                          duration
+                            ? (clip.duration / duration) *
+                              100
+                            : 0
+                        }%`,
+                        minWidth: 20,
+                      }}
+                      title={`${clip.start.toFixed(1)} sn`}
+                    >
+                      <span className="truncate">
+                        🔊 {clip.sound.name}
+                      </span>
+                    </button>
+                  ))}
 
                   <div
                     className="pointer-events-none absolute inset-y-0 w-0.5 bg-white/80"
                     style={{
                       left: `${
                         duration
-                          ? (currentTime /
-                              duration) *
-                            100
+                          ? (time / duration) * 100
                           : 0
                       }%`,
                     }}
                   />
                 </div>
 
-                {selected && (
-                  <div className="rounded-xl border border-violet/30 bg-violet/10 p-4">
-                    <div className="mb-4 flex items-center justify-between gap-3">
+                {chosen && (
+                  <div className="mt-4 rounded-xl border border-violet/30 bg-violet/10 p-4">
+                    <div className="mb-4 flex items-center justify-between gap-2">
                       <h3 className="truncate text-sm font-bold">
-                        {selectedSound?.name}
+                        {chosen.sound.name}
                       </h3>
 
                       <button
                         type="button"
                         onClick={() =>
-                          removeClip(
-                            selected.id
-                          )
+                          remove(chosen.id)
                         }
                         className="text-pink"
-                        title="Klibi sil"
+                        aria-label="Efekti sil"
                       >
-                        <Trash2
-                          size={18}
-                        />
+                        <Trash2 size={18} />
                       </button>
                     </div>
 
                     <label className="block text-xs text-white/70">
                       Başlangıç:{" "}
-                      {selected.start.toFixed(
-                        1
-                      )}{" "}
-                      saniye
+                      {chosen.start.toFixed(1)} sn
 
                       <input
+                        className="mt-2 w-full accent-violet"
                         type="range"
                         min={0}
                         max={Math.max(
                           0,
-                          duration -
-                            selected.duration
+                          duration - chosen.duration
                         )}
                         step={0.1}
-                        value={
-                          selected.start
+                        value={chosen.start}
+                        onChange={(e) =>
+                          update(chosen.id, {
+                            start: Number(e.target.value),
+                          })
                         }
-                        onChange={(
-                          event
-                        ) =>
-                          updateClip(
-                            selected.id,
-                            {
-                              start:
-                                Number(
-                                  event
-                                    .target
-                                    .value
-                                ),
-                            }
-                          )
-                        }
-                        className="mt-2 w-full accent-violet"
                       />
                     </label>
 
                     <label className="mt-4 block text-xs text-white/70">
-                      Ses seviyesi:{" "}
-                      {selected.volume}%
+                      Ses: %{chosen.volume}
 
                       <input
+                        className="mt-2 w-full accent-violet"
                         type="range"
                         min={0}
                         max={100}
                         step={1}
-                        value={
-                          selected.volume
+                        value={chosen.volume}
+                        onChange={(e) =>
+                          update(chosen.id, {
+                            volume: Number(e.target.value),
+                          })
                         }
-                        onChange={(
-                          event
-                        ) =>
-                          updateClip(
-                            selected.id,
-                            {
-                              volume:
-                                Number(
-                                  event
-                                    .target
-                                    .value
-                                ),
-                            }
-                          )
-                        }
-                        className="mt-2 w-full accent-violet"
                       />
                     </label>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (
-                          selectedSound
-                        ) {
-                          playSound(
-                            selectedSound,
-                            selected.volume /
-                              100
-                          );
-                        }
-                      }}
-                      className="btn-ghost mt-4 flex items-center gap-2 text-xs"
-                    >
-                      <Play size={15} />
-                      Efekti Dinle
-                    </button>
                   </div>
                 )}
 
                 <button
                   type="button"
                   onClick={() => {
-                    stopAudio();
+                    stopClips();
                     setClips([]);
-                    setSelectedId(null);
+                    setSelected(null);
                     seek(0);
                   }}
-                  className="flex items-center gap-2 text-xs text-white/50 hover:text-white"
+                  className="mt-4 text-xs text-white/50 hover:text-white"
                 >
-                  <RotateCcw
-                    size={15}
-                  />
                   Zaman Çizelgesini Temizle
                 </button>
-              </div>
+              </>
             )}
           </div>
 
@@ -1007,22 +959,16 @@ export default function EditStudio() {
             </p>
           )}
 
-          <div className="rounded-xl border border-white/10 bg-white/5 p-4">
-            <p className="text-sm font-semibold">
-              Edit Studio 2.0 — Ses Düzenleme
+          <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-xs leading-6 text-white/50">
+            <p className="mb-1 font-semibold text-white">
+              HAGY Edit Studio 3.0
             </p>
 
-            <p className="mt-2 text-xs leading-6 text-white/50">
-              Gerçek ses dosyası yükleme,
-              birden fazla ses klibi,
-              sürükleyerek zamanlama ve ses
-              seviyesi ayarı kullanılabilir.
-              MP4 dışa aktarma ve hazır
-              telif uyumlu ses paketi henüz
-              yoktur. Düzenleme tarayıcıda
-              yapılır; sayfayı yenilersen
-              proje sıfırlanır.
-            </p>
+            Sesleri çevrimiçi ara, dinle, videoya ekle
+            ve başlangıç saniyesini ayarla. MP4 dışa
+            aktarma henüz yoktur. Proje sayfa
+            yenilenince sıfırlanır. Çevrimiçi sesler
+            üçüncü taraf servise bağlıdır.
           </div>
         </section>
       </div>
