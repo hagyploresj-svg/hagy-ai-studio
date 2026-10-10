@@ -19,7 +19,6 @@ import {
   X,
   Bell,
   Search,
-  Plus,
   ArrowUpRight,
   Clock3,
   CheckCircle2,
@@ -29,6 +28,7 @@ import {
   ChevronRight,
   ShieldCheck,
   Loader2,
+  RefreshCw,
 } from "lucide-react";
 
 const supabase = createClient(
@@ -36,13 +36,24 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-type MenuItem = {
-  id: string;
-  label: string;
-  icon: React.ElementType;
-};
+type AccessStatus =
+  | "checking"
+  | "approved"
+  | "pending"
+  | "rejected"
+  | "error";
 
-const menuItems: MenuItem[] = [
+type MenuId =
+  | "overview"
+  | "customers"
+  | "tasks"
+  | "finance"
+  | "assistant"
+  | "analytics"
+  | "portfolio"
+  | "settings";
+
+const menuItems = [
   { id: "overview", label: "Genel Bakış", icon: LayoutDashboard },
   { id: "customers", label: "Müşteriler", icon: Users },
   { id: "tasks", label: "Görevler", icon: ListTodo },
@@ -51,26 +62,23 @@ const menuItems: MenuItem[] = [
   { id: "analytics", label: "Raporlar", icon: BarChart3 },
   { id: "portfolio", label: "Dijital Portföy", icon: BriefcaseBusiness },
   { id: "settings", label: "Ayarlar", icon: Settings },
-];
+] as const;
 
 const demoTasks = [
   {
     title: "Müşteri teklifini hazırla",
     detail: "Satış departmanı",
     date: "Bugün",
-    done: false,
   },
   {
     title: "Haftalık raporu kontrol et",
     detail: "Yönetim",
     date: "Yarın",
-    done: false,
   },
   {
     title: "Yeni müşteri görüşmesi",
     detail: "İş geliştirme",
     date: "Tamamlandı",
-    done: true,
   },
 ];
 
@@ -98,13 +106,13 @@ const demoCustomers = [
 function StatCard({
   title,
   value,
-  icon: Icon,
   detail,
+  icon: Icon,
 }: {
   title: string;
   value: string;
-  icon: React.ElementType;
   detail: string;
+  icon: React.ElementType;
 }) {
   return (
     <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-5">
@@ -114,8 +122,7 @@ function StatCard({
           <Icon size={19} />
         </div>
       </div>
-
-      <div className="text-3xl font-bold tracking-tight">{value}</div>
+      <div className="text-3xl font-bold">{value}</div>
       <p className="mt-2 text-xs text-gray-500">{detail}</p>
     </div>
   );
@@ -125,40 +132,93 @@ export default function BusinessDashboardPage() {
   const router = useRouter();
 
   const [user, setUser] = useState<User | null>(null);
-  const [checking, setChecking] = useState(true);
-  const [activeTab, setActiveTab] = useState("overview");
+  const [accessStatus, setAccessStatus] =
+    useState<AccessStatus>("checking");
+
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [activeTab, setActiveTab] = useState<MenuId>("overview");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const [search, setSearch] = useState("");
   const [aiMessage, setAiMessage] = useState("");
   const [aiResponse, setAiResponse] = useState("");
-  const [completedTasks, setCompletedTasks] = useState<number[]>([2]);
+  const [completedTasks, setCompletedTasks] =
+    useState<number[]>([2]);
+
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     let mounted = true;
 
-    async function checkSession() {
-      const {
-        data: { user: currentUser },
-      } = await supabase.auth.getUser();
+    async function checkAccess() {
+      setAccessStatus("checking");
+
+      const { data, error } = await supabase.auth.getUser();
 
       if (!mounted) return;
 
-      if (!currentUser) {
+      if (error || !data.user) {
         router.replace("/business/login");
         return;
       }
 
-      setUser(currentUser);
-      setChecking(false);
+      const currentUser = data.user;
+
+      const { data: adminResult, error: adminError } =
+        await supabase.rpc("is_business_admin");
+
+      if (!mounted) return;
+
+      if (adminError) {
+        setUser(null);
+        setAccessStatus("error");
+        return;
+      }
+
+      if (adminResult === true) {
+        setUser(currentUser);
+        setIsAdmin(true);
+        setAccessStatus("approved");
+        return;
+      }
+
+      const { data: application, error: applicationError } =
+        await supabase
+          .from("business_applications")
+          .select("status")
+          .eq("user_id", currentUser.id)
+          .maybeSingle();
+
+      if (!mounted) return;
+
+      if (applicationError) {
+        setUser(null);
+        setAccessStatus("error");
+        return;
+      }
+
+      setIsAdmin(false);
+
+      if (application?.status === "approved") {
+        setUser(currentUser);
+        setAccessStatus("approved");
+      } else if (application?.status === "rejected") {
+        setUser(null);
+        setAccessStatus("rejected");
+      } else {
+        setUser(null);
+        setAccessStatus("pending");
+      }
     }
 
-    checkSession();
+    void checkAccess();
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (!session) {
+    } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "SIGNED_OUT") {
+        setUser(null);
+        setAccessStatus("checking");
         router.replace("/business/login");
       }
     });
@@ -167,7 +227,7 @@ export default function BusinessDashboardPage() {
       mounted = false;
       subscription.unsubscribe();
     };
-  }, [router]);
+  }, [router, refreshKey]);
 
   const companyName =
     typeof user?.user_metadata?.company_name === "string"
@@ -179,7 +239,9 @@ export default function BusinessDashboardPage() {
       ? user.user_metadata.full_name
       : "İşletme Yöneticisi";
 
-  const activeItem = menuItems.find((item) => item.id === activeTab);
+  const activeItem = menuItems.find(
+    (item) => item.id === activeTab
+  );
 
   async function handleLogout() {
     setLoggingOut(true);
@@ -188,7 +250,7 @@ export default function BusinessDashboardPage() {
     router.refresh();
   }
 
-  function openTab(tab: string) {
+  function openTab(tab: MenuId) {
     setActiveTab(tab);
     setSidebarOpen(false);
     setSearch("");
@@ -202,6 +264,7 @@ export default function BusinessDashboardPage() {
     setAiResponse(
       "Hagy AI Asistan'ın sohbet arayüzü hazır! Gerçek yanıtlar ve işletme verileriyle işlem yapabilmesi için güvenli AI API bağlantısını sonraki aşamada ekleyeceğiz."
     );
+
     setAiMessage("");
   }
 
@@ -213,19 +276,85 @@ export default function BusinessDashboardPage() {
     );
   }
 
-  if (checking) {
+  if (accessStatus === "checking") {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#080610] text-white">
         <div className="text-center">
           <Loader2
-            size={34}
+            size={36}
             className="mx-auto mb-4 animate-spin text-purple-400"
           />
           <p className="text-sm text-gray-400">
-            Güvenli oturum kontrol ediliyor...
+            İşletme erişimi kontrol ediliyor...
           </p>
         </div>
       </div>
+    );
+  }
+
+  if (accessStatus !== "approved") {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-[#080610] px-5 text-white">
+        <div className="w-full max-w-lg rounded-3xl border border-white/10 bg-white/5 p-8 text-center">
+          <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-3xl bg-purple-500/10">
+            {accessStatus === "pending" ? (
+              <Clock3 size={38} className="text-amber-400" />
+            ) : accessStatus === "rejected" ? (
+              <X size={38} className="text-red-400" />
+            ) : (
+              <ShieldCheck size={38} className="text-purple-400" />
+            )}
+          </div>
+
+          <p className="mb-3 text-xs font-semibold uppercase tracking-[0.2em] text-purple-400">
+            HAGY BUSINESS PRIVATE ACCESS
+          </p>
+
+          <h1 className="text-3xl font-bold">
+            {accessStatus === "pending"
+              ? "Başvurunuz Onay Bekliyor"
+              : accessStatus === "rejected"
+                ? "Başvurunuz Reddedildi"
+                : "Erişim Doğrulanamadı"}
+          </h1>
+
+          <p className="mt-5 text-sm leading-7 text-gray-400">
+            {accessStatus === "pending"
+              ? "Hagy Business hesabınız oluşturuldu. Yönetici başvurunuzu onayladıktan sonra işletme panelini kullanabilirsiniz."
+              : accessStatus === "rejected"
+                ? "İşletme başvurunuz onaylanmadı. Destek almak için Hagy ekibiyle iletişime geçebilirsiniz."
+                : "Hesap yetkileri şu anda kontrol edilemiyor. Lütfen yeniden deneyin."}
+          </p>
+
+          <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:justify-center">
+            <button
+              type="button"
+              onClick={() => setRefreshKey((n) => n + 1)}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-purple-600 px-6 py-3 text-sm font-semibold hover:bg-purple-500"
+            >
+              <RefreshCw size={17} />
+              Durumu Kontrol Et
+            </button>
+
+            <button
+              type="button"
+              onClick={handleLogout}
+              disabled={loggingOut}
+              className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/10 px-6 py-3 text-sm font-semibold hover:bg-white/5 disabled:opacity-50"
+            >
+              <LogOut size={17} />
+              Çıkış Yap
+            </button>
+          </div>
+
+          <Link
+            href="/business"
+            className="mt-7 inline-block text-sm text-gray-500 hover:text-white"
+          >
+            Hagy Business Ana Sayfa
+          </Link>
+        </div>
+      </main>
     );
   }
 
@@ -242,7 +371,9 @@ export default function BusinessDashboardPage() {
 
       <aside
         className={`fixed inset-y-0 left-0 z-50 flex w-72 flex-col border-r border-white/10 bg-[#100C1C] transition-transform duration-300 lg:translate-x-0 ${
-          sidebarOpen ? "translate-x-0" : "-translate-x-full"
+          sidebarOpen
+            ? "translate-x-0"
+            : "-translate-x-full"
         }`}
       >
         <div className="flex h-20 items-center justify-between border-b border-white/10 px-6">
@@ -266,7 +397,7 @@ export default function BusinessDashboardPage() {
             type="button"
             onClick={() => setSidebarOpen(false)}
             className="text-gray-400 lg:hidden"
-            aria-label="Kapat"
+            aria-label="Menüyü kapat"
           >
             <X size={23} />
           </button>
@@ -278,7 +409,9 @@ export default function BusinessDashboardPage() {
               <Sparkles size={14} />
               İşletme Hesabı
             </div>
-            <p className="truncate font-semibold">{companyName}</p>
+            <p className="truncate font-semibold">
+              {companyName}
+            </p>
             <p className="mt-1 text-xs text-gray-500">
               Yönetim paneli
             </p>
@@ -309,6 +442,16 @@ export default function BusinessDashboardPage() {
                 </button>
               );
             })}
+
+            {isAdmin && (
+              <Link
+                href="/business/admin"
+                className="flex items-center gap-3 rounded-xl px-4 py-3 text-sm text-amber-300 hover:bg-amber-500/10"
+              >
+                <ShieldCheck size={19} />
+                Super Admin
+              </Link>
+            )}
           </nav>
         </div>
 
@@ -424,21 +567,18 @@ export default function BusinessDashboardPage() {
                   icon={Users}
                   detail="Örnek müşteri sayısı"
                 />
-
                 <StatCard
                   title="Aktif Görevler"
                   value="14"
                   icon={ListTodo}
                   detail="Örnek görev sayısı"
                 />
-
                 <StatCard
                   title="Aylık Gelir"
                   value="₺85.400"
                   icon={Wallet}
                   detail="Örnek aylık gelir"
                 />
-
                 <StatCard
                   title="AI İşlemleri"
                   value="42"
@@ -462,7 +602,7 @@ export default function BusinessDashboardPage() {
                     <button
                       type="button"
                       onClick={() => openTab("tasks")}
-                      className="text-sm text-purple-400 hover:text-purple-300"
+                      className="text-sm text-purple-400"
                     >
                       Tümünü Gör
                     </button>
@@ -470,7 +610,8 @@ export default function BusinessDashboardPage() {
 
                   <div className="space-y-3">
                     {demoTasks.map((task, index) => {
-                      const done = completedTasks.includes(index);
+                      const done =
+                        completedTasks.includes(index);
 
                       return (
                         <button
@@ -501,7 +642,6 @@ export default function BusinessDashboardPage() {
                             >
                               {task.title}
                             </p>
-
                             <p className="mt-1 text-xs text-gray-500">
                               {task.detail}
                             </p>
@@ -516,11 +656,12 @@ export default function BusinessDashboardPage() {
                   </div>
 
                   <p className="mt-4 text-xs text-gray-600">
-                    Görev işaretlemeleri yalnızca bu sayfa açıkken korunur.
+                    Görev işaretlemeleri yalnızca bu sayfa
+                    açıkken korunur.
                   </p>
                 </section>
 
-                <section className="relative overflow-hidden rounded-2xl border border-purple-500/20 bg-gradient-to-br from-purple-900/40 to-[#151020] p-6 xl:col-span-2">
+                <section className="rounded-2xl border border-purple-500/20 bg-gradient-to-br from-purple-900/40 to-[#151020] p-6 xl:col-span-2">
                   <div className="mb-6 flex h-12 w-12 items-center justify-center rounded-2xl bg-purple-500/20">
                     <Bot size={25} className="text-purple-300" />
                   </div>
@@ -534,15 +675,15 @@ export default function BusinessDashboardPage() {
                   </h3>
 
                   <p className="mt-3 text-sm leading-7 text-gray-400">
-                    Rapor hazırlama, müşteri analizi, görev planlama
-                    ve iş süreçlerini yönetme deneyimini tek
-                    panelde sunmayı hedefliyoruz.
+                    Rapor hazırlama, müşteri analizi, görev
+                    planlama ve iş süreçlerini yönetme
+                    deneyimini tek panelde sunmayı hedefliyoruz.
                   </p>
 
                   <button
                     type="button"
                     onClick={() => openTab("assistant")}
-                    className="mt-8 flex items-center gap-2 rounded-xl bg-purple-600 px-5 py-3 text-sm font-semibold hover:bg-purple-500"
+                    className="mt-8 flex items-center gap-2 rounded-xl bg-purple-600 px-5 py-3 text-sm font-semibold"
                   >
                     Asistanı Aç
                     <ArrowUpRight size={17} />
@@ -612,7 +753,10 @@ export default function BusinessDashboardPage() {
             <div className="mx-auto max-w-4xl">
               <div className="mb-8 text-center">
                 <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-purple-600/20">
-                  <Sparkles size={32} className="text-purple-400" />
+                  <Sparkles
+                    size={32}
+                    className="text-purple-400"
+                  />
                 </div>
 
                 <h1 className="text-3xl font-bold">
@@ -632,10 +776,11 @@ export default function BusinessDashboardPage() {
                   </div>
 
                   <p className="text-sm leading-7 text-gray-300">
-                    Merhaba! Ben Hagy AI Asistan. Bu ekran şu anda
-                    demo modunda. Yakında işletme raporlarını
-                    hazırlayabilecek, görevlerini planlayabilecek
-                    ve müşteri süreçlerinde sana yardımcı olabileceğim.
+                    Merhaba! Ben Hagy AI Asistan. Bu ekran
+                    şu anda demo modunda. Yakında işletme
+                    raporlarını hazırlayabilecek, görevlerini
+                    planlayabilecek ve müşteri süreçlerinde
+                    sana yardımcı olabileceğim.
                   </p>
                 </div>
 
@@ -653,7 +798,9 @@ export default function BusinessDashboardPage() {
                 <form onSubmit={handleAiSubmit}>
                   <textarea
                     value={aiMessage}
-                    onChange={(e) => setAiMessage(e.target.value)}
+                    onChange={(e) =>
+                      setAiMessage(e.target.value)
+                    }
                     placeholder="Hagy AI'ya bir şey sor..."
                     rows={4}
                     className="w-full resize-none rounded-xl border border-white/10 bg-[#0D0A17] p-4 text-sm text-white outline-none focus:border-purple-500"
@@ -662,7 +809,7 @@ export default function BusinessDashboardPage() {
                   <button
                     type="submit"
                     disabled={!aiMessage.trim()}
-                    className="mt-4 flex items-center gap-2 rounded-xl bg-purple-600 px-6 py-3 text-sm font-semibold hover:bg-purple-500 disabled:opacity-50"
+                    className="mt-4 flex items-center gap-2 rounded-xl bg-purple-600 px-6 py-3 text-sm font-semibold disabled:opacity-50"
                   >
                     <Sparkles size={17} />
                     Mesaj Gönder
@@ -674,20 +821,19 @@ export default function BusinessDashboardPage() {
 
           {activeTab === "tasks" && (
             <div className="space-y-6">
-              <div className="flex items-center justify-between gap-4">
-                <div>
-                  <h1 className="text-2xl font-bold">
-                    Görev Yönetimi
-                  </h1>
-                  <p className="mt-2 text-sm text-gray-400">
-                    Örnek görevleri görüntüle ve işaretle.
-                  </p>
-                </div>
+              <div>
+                <h1 className="text-2xl font-bold">
+                  Görev Yönetimi
+                </h1>
+                <p className="mt-2 text-sm text-gray-400">
+                  Örnek görevleri görüntüle ve işaretle.
+                </p>
               </div>
 
               <div className="space-y-3">
                 {demoTasks.map((task, index) => {
-                  const done = completedTasks.includes(index);
+                  const done =
+                    completedTasks.includes(index);
 
                   return (
                     <button
@@ -698,20 +844,22 @@ export default function BusinessDashboardPage() {
                     >
                       {done ? (
                         <CheckCircle2
-                          className="text-emerald-400"
                           size={22}
+                          className="text-emerald-400"
                         />
                       ) : (
                         <Circle
-                          className="text-gray-500"
                           size={22}
+                          className="text-gray-500"
                         />
                       )}
 
                       <div className="flex-1">
                         <p
                           className={`font-medium ${
-                            done ? "text-gray-500 line-through" : ""
+                            done
+                              ? "text-gray-500 line-through"
+                              : ""
                           }`}
                         >
                           {task.title}
@@ -750,7 +898,9 @@ export default function BusinessDashboardPage() {
                 />
                 <input
                   value={search}
-                  onChange={(e) => setSearch(e.target.value)}
+                  onChange={(e) =>
+                    setSearch(e.target.value)
+                  }
                   placeholder="Müşteri ara..."
                   className="w-full rounded-xl border border-white/10 bg-white/5 py-3 pl-12 pr-4 text-white outline-none focus:border-purple-500"
                 />
@@ -794,16 +944,27 @@ export default function BusinessDashboardPage() {
             </div>
           )}
 
-          {["finance", "analytics", "portfolio", "settings"].includes(
-            activeTab
-          ) && (
+          {(
+            [
+              "finance",
+              "analytics",
+              "portfolio",
+              "settings",
+            ] as MenuId[]
+          ).includes(activeTab) && (
             <div className="mx-auto max-w-2xl py-12 text-center">
               <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-3xl bg-purple-500/10">
                 {activeTab === "finance" && (
-                  <Wallet size={34} className="text-purple-400" />
+                  <Wallet
+                    size={34}
+                    className="text-purple-400"
+                  />
                 )}
                 {activeTab === "analytics" && (
-                  <BarChart3 size={34} className="text-purple-400" />
+                  <BarChart3
+                    size={34}
+                    className="text-purple-400"
+                  />
                 )}
                 {activeTab === "portfolio" && (
                   <BriefcaseBusiness
@@ -812,7 +973,10 @@ export default function BusinessDashboardPage() {
                   />
                 )}
                 {activeTab === "settings" && (
-                  <Settings size={34} className="text-purple-400" />
+                  <Settings
+                    size={34}
+                    className="text-purple-400"
+                  />
                 )}
               </div>
 
@@ -821,9 +985,9 @@ export default function BusinessDashboardPage() {
               </h1>
 
               <p className="mt-4 leading-7 text-gray-400">
-                Bu modülün arayüzü hazır. Gerçek işletme verileri,
-                kayıt işlemleri ve gelişmiş özellikler sonraki
-                aşamalarda eklenecek.
+                Bu modülün arayüzü hazır. Gerçek işletme
+                verileri, kayıt işlemleri ve gelişmiş
+                özellikler sonraki aşamalarda eklenecek.
               </p>
 
               <div className="mt-8 flex items-center justify-center gap-2 text-sm text-purple-300">
