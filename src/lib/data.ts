@@ -29,6 +29,7 @@ export interface Template {
   seconds: number;
   from: string;
   to: string;
+  prompt: string;
 }
 
 export const studios: StudioInfo[] = [
@@ -51,8 +52,8 @@ export const studios: StudioInfo[] = [
       tr: "Sinematik Edit Stüdyosu",
     },
     desc: {
-      en: "Create cinematic effects, transitions and motion graphics.",
-      tr: "Sinematik efektler, geçişler ve hareketli grafikler oluştur.",
+      en: "Create cinematic effects and realistic camera movements.",
+      tr: "Sinematik efektler ve gerçekçi kamera hareketleri oluştur.",
     },
     icon: "clapperboard",
   },
@@ -101,12 +102,14 @@ export const templates: Template[] = [
       tr: "Kahraman Girişi",
     },
     desc: {
-      en: "Your character walks through mist with companion animals.",
-      tr: "Karakterin sisin içinden yoldaş hayvanlarla yürür.",
+      en: "Epic character entrance through atmospheric fog.",
+      tr: "Atmosferik sislerin arasından destansı karakter girişi.",
     },
-    seconds: 8,
+    seconds: 5,
     from: "#8B5CF6",
     to: "#3B82F6",
+    prompt:
+      "An epic fantasy hero walks slowly and confidently toward the camera. Atmospheric fog rolls across the ground, dramatic cinematic lighting, subtle glowing particles, natural body movements, realistic footsteps. Smooth backward tracking shot. Preserve the original character's face and outfit. Ultra-realistic, no distortion, no sudden cuts.",
   },
   {
     id: "character-cinematic",
@@ -120,9 +123,11 @@ export const templates: Template[] = [
       en: "Dramatic entrance with cinematic lighting.",
       tr: "Sinematik ışıklarla dramatik karakter girişi.",
     },
-    seconds: 10,
+    seconds: 5,
     from: "#6366F1",
     to: "#111827",
+    prompt:
+      "A powerful cinematic character introduction. The character slowly turns toward the camera and takes a confident step forward. Dramatic side lighting, soft smoke, realistic clothing movement, cinematic depth of field and smooth camera push-in. Preserve the original facial features and clothing. Photorealistic movement, no distortion, no sudden cuts.",
   },
   {
     id: "gift-epic",
@@ -133,12 +138,14 @@ export const templates: Template[] = [
       tr: "Hediye Edit — Epic",
     },
     desc: {
-      en: "Dramatic zooms and light bursts on every gift.",
-      tr: "Her hediyede dramatik yakınlaşma ve ışık patlamaları.",
+      en: "Dramatic lighting and celebratory energy.",
+      tr: "Dramatik ışıklandırma ve kutlama atmosferi.",
     },
-    seconds: 15,
+    seconds: 5,
     from: "#EC4899",
     to: "#8B5CF6",
+    prompt:
+      "An epic livestream celebration. Brilliant glowing light bursts and sparkling particles surround the original subject. The camera performs a smooth dramatic push-in. Powerful cinematic atmosphere, rich purple and gold lighting, energetic but natural movement. Preserve the original subject and composition. No distortion, no text, no sudden cuts.",
   },
   {
     id: "gift-velocity",
@@ -149,12 +156,14 @@ export const templates: Template[] = [
       tr: "Hediye Edit — Velocity",
     },
     desc: {
-      en: "Fast speed ramps synced to the beat.",
-      tr: "Ritme senkron hızlı hız rampaları.",
+      en: "Dynamic movement and energetic camera motion.",
+      tr: "Dinamik hareket ve enerjik kamera geçişleri.",
     },
-    seconds: 15,
+    seconds: 5,
     from: "#F97316",
     to: "#EC4899",
+    prompt:
+      "A high-energy cinematic livestream gift animation. Smooth dynamic camera movement, vivid neon light trails, glowing particles and a dramatic burst of light. Maintain the original subject's appearance and natural proportions. Energetic visual atmosphere with fluid movement, no facial distortion, no text, no sudden cuts.",
   },
   {
     id: "gift-luxury",
@@ -165,12 +174,14 @@ export const templates: Template[] = [
       tr: "Hediye Edit — Luxury",
     },
     desc: {
-      en: "Gold-toned slow reveal for big supporters.",
-      tr: "Büyük destekçiler için altın tonlu yavaş tanıtım.",
+      en: "Elegant gold-toned celebration.",
+      tr: "Altın tonlarında zarif kutlama animasyonu.",
     },
-    seconds: 12,
+    seconds: 5,
     from: "#F59E0B",
     to: "#151522",
+    prompt:
+      "An elegant luxury celebration with floating golden particles, soft golden light rays and beautiful reflections. The camera slowly moves toward the original subject. Premium black and gold cinematic atmosphere, realistic motion and smooth transitions. Preserve the original subject's appearance. No distortion, no text, no sudden cuts.",
   },
   {
     id: "esports-intro",
@@ -181,12 +192,14 @@ export const templates: Template[] = [
       tr: "Takım Tanıtımı",
     },
     desc: {
-      en: "Roster reveal with glitch transitions.",
-      tr: "Glitch geçişlerle kadro tanıtımı.",
+      en: "Dramatic esports-style introduction.",
+      tr: "Dramatik e-spor tarzı giriş.",
     },
-    seconds: 10,
+    seconds: 5,
     from: "#3B82F6",
     to: "#8B5CF6",
+    prompt:
+      "A powerful esports cinematic introduction. Dramatic blue and purple neon lighting, atmospheric smoke and subtle electric light effects. The original subjects pose confidently while the camera moves smoothly forward. Epic competitive gaming atmosphere, realistic motion, preserve all original faces and clothing. No distortion, no text, no sudden cuts.",
   },
   {
     id: "stream-brand",
@@ -197,12 +210,14 @@ export const templates: Template[] = [
       tr: "Yayıncı Marka Animasyonu",
     },
     desc: {
-      en: "Animated logo sting for stream starts.",
-      tr: "Yayın başlangıçları için animasyonlu logo.",
+      en: "Cinematic streamer branding animation.",
+      tr: "Sinematik yayıncı marka animasyonu.",
     },
     seconds: 5,
     from: "#EC4899",
     to: "#3B82F6",
+    prompt:
+      "A premium cinematic streamer branding animation. The original logo or central subject remains recognizable while elegant neon purple and blue lights sweep across the scene. Subtle glowing particles, atmospheric smoke and smooth camera movement. Preserve the original logo shape and visual identity. No unwanted text, no distortion, no sudden cuts.",
   },
   {
     id: "highlight-reel",
@@ -213,12 +228,14 @@ export const templates: Template[] = [
       tr: "Öne Çıkanlar",
     },
     desc: {
-      en: "Auto-paced highlights with cinematic grading.",
-      tr: "Sinematik renk ayarlı otomatik tempolu kesitler.",
+      en: "Dynamic cinematic gaming moment.",
+      tr: "Dinamik sinematik oyun sahnesi.",
     },
-    seconds: 20,
+    seconds: 5,
     from: "#8B5CF6",
     to: "#F97316",
+    prompt:
+      "A dramatic cinematic gaming highlight moment. Dynamic but smooth camera movement, intense atmospheric lighting, subtle sparks and realistic environmental motion. The central subject performs a natural action while remaining visually consistent with the original image. High-quality cinematic look, no distortion, no sudden cuts.",
   },
   {
     id: "product-reveal",
@@ -229,12 +246,14 @@ export const templates: Template[] = [
       tr: "Sinematik Ürün Tanıtımı",
     },
     desc: {
-      en: "Studio lighting and slow orbit around your product.",
-      tr: "Stüdyo ışığı ve ürün etrafında yavaş dönüş.",
+      en: "Studio lighting and slow camera orbit.",
+      tr: "Stüdyo ışığı ve yavaş kamera dönüşü.",
     },
-    seconds: 10,
+    seconds: 5,
     from: "#3B82F6",
     to: "#151522",
+    prompt:
+      "A premium cinematic product advertisement. The camera slowly orbits around the original product while soft studio lights reveal its details. Elegant reflections, realistic materials, professional commercial lighting and smooth camera motion. Keep the product's original shape, branding and colors consistent. No distortion, no additional objects, no unwanted text.",
   },
   {
     id: "luxury-spot",
@@ -245,12 +264,14 @@ export const templates: Template[] = [
       tr: "Lüks Ürün Reklamı",
     },
     desc: {
-      en: "Dark, glossy, premium look.",
-      tr: "Koyu, parlak, premium görünüm.",
+      en: "Dark, glossy, premium commercial.",
+      tr: "Koyu, parlak ve premium reklam.",
     },
-    seconds: 12,
+    seconds: 5,
     from: "#8B5CF6",
     to: "#151522",
+    prompt:
+      "An ultra-premium luxury product commercial. The original product is displayed against an elegant dark background with beautiful glossy reflections and subtle golden highlights. Smooth slow camera push-in, sophisticated studio lighting and realistic product details. Preserve the original product design, branding and proportions. No distortion, no unwanted text.",
   },
   {
     id: "social-ad",
@@ -261,12 +282,14 @@ export const templates: Template[] = [
       tr: "Sosyal Reklam Paketi",
     },
     desc: {
-      en: "Vertical ad with bold text and CTA.",
-      tr: "Cesur metin ve CTA içeren dikey reklam.",
+      en: "Eye-catching social media commercial.",
+      tr: "Dikkat çekici sosyal medya reklamı.",
     },
-    seconds: 9,
+    seconds: 5,
     from: "#F97316",
     to: "#8B5CF6",
+    prompt:
+      "A modern eye-catching social media advertisement. The original product or subject remains clearly visible while the camera performs a smooth cinematic movement. Bright professional lighting, clean modern background, elegant reflections and engaging visual energy. Preserve the original branding and appearance. No distorted text, no unwanted objects, no sudden cuts.",
   },
 ];
 
@@ -278,6 +301,6 @@ export const effects = [
   "Minimal",
 ];
 
-export const durations = [5, 10, 15, 30];
+export const durations = [3, 5];
 
 export const ratios = ["9:16", "16:9", "1:1"];
